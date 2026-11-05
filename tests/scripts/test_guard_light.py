@@ -294,3 +294,38 @@ def test_light_topics_archive_finished_and_adopt_untracked(tmp_path, light):
     assert "archived finished run bay-area-r3" in out
     assert any(p.name.startswith("bay-area-r3-") for p in (sl / "archive").iterdir())
     assert not (sl / "pool.json").exists()
+
+
+# ---- light: bringing parked topics up ----
+
+def _bay_run(repo):
+    sl = repo / ".superlite"
+    plans = repo / "docs" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "2026-11-04-bay.md").write_text("# Bay: machine plan\n\n**Goal:** Graded shores and a wider bay. More detail here.\n")
+    (sl / "stable.json").write_text(json.dumps({"stable": ["T1", "T2", "T3"], "fix": []}))
+    (sl / "checkpoints.json").write_text(json.dumps({"plan": "docs/plans/2026-11-04-bay.md",
+                                                     "entries": [{"task": "T1"}, {"task": "T2"}]}))
+
+
+def test_parking_says_where_it_stood_and_to_carry_on(tmp_path, light):
+    repo = _repo(tmp_path)
+    _ensure(repo, "bay")
+    _bay_run(repo)
+    out = _ensure(repo, "rivers")
+    assert "parked open run bay: 2 of 3 tasks done" in out and "Goal: Graded shores and a wider bay" in out
+    assert "carry on without waiting" in out
+
+
+def test_topics_status_and_brief(tmp_path, light):
+    repo = _repo(tmp_path)
+    _ensure(repo, "bay")
+    _bay_run(repo)
+    _ensure(repo, "rivers")
+    st = run(SCRIPTS / "topics.py", "status", cwd=repo).out
+    assert "parked:" in st and "- bay: 2 of 3 tasks done" in st
+    brief = run(SCRIPTS / "topics.py", "brief", cwd=repo).out
+    assert brief.startswith("Parked superlite topics") and "bay: 2 of 3 tasks done" in brief
+    assert "bay" in _session_start(repo, tmp_path / "home") and "Parked superlite topics" in _session_start(repo, tmp_path / "home")
+    _ensure(repo, "bay")
+    assert run(SCRIPTS / "topics.py", "brief", cwd=repo).out == ""   # nothing parked but rivers, which has no run yet

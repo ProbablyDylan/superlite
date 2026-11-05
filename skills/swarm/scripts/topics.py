@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Guard light: one run per topic in the same checkout, one at a time, with no branches or worktrees.
 
-    topics.py status
+    topics.py status     the live topic and the parked ones, one plain line each
+    topics.py brief      one line for session start (empty when nothing is parked)
 
 `switch(live, want)` (called by `session ensure` in guard light) keeps the live run folder for one topic, named
 in `.superlite/topic.txt`. Starting another topic sets the live run aside first: an open run goes to
@@ -80,6 +81,73 @@ def _free(base_dir: Path, name: str) -> Path:
     return d
 
 
+def _plan(d: Path, project: Path):
+    """The run's plan file: the one its checkpoints name, else the approved one, else None."""
+    for rel in (base.read_json(d / "checkpoints.json", {}).get("plan"),
+                base.read_json(d / "orchestrator.json", {}).get("review_path")):
+        if rel and (project / rel).is_file():
+            return project / rel
+    return None
+
+
+def _goal(plan) -> str:
+    """The plan's `**Goal:**` line (first sentence), else its title."""
+    if plan is None:
+        return ""
+    title = ""
+    try:
+        lines = plan.read_text(encoding="utf-8").splitlines()[:40]
+    except OSError:
+        return ""
+    for line in lines:
+        if line.startswith("**Goal:**"):
+            g = line[len("**Goal:**"):].strip()
+            first = g.split(". ")[0].rstrip(".")
+            return first if len(first) <= 300 else first[:297] + "..."
+        if not title and line.startswith("# "):
+            title = line[2:].strip()
+    return title
+
+
+def summary(d: Path, project: Path, name: str) -> dict:  # O(files)
+    """Plain facts about one run folder: name, goal, tasks done and planned, open or finished, last change."""
+    st = base.read_json(d / "stable.json", {})
+    planned = set((st.get("stable") or []) + (st.get("fix") or [])) if isinstance(st, dict) else set()
+    ck = base.read_json(d / "checkpoints.json", {})
+    done = {e.get("task") for e in (ck.get("entries") or []) if isinstance(e, dict)} & planned if planned else set()
+    files = [f for e in entries(d) for f in ([e] if e.is_file() else e.rglob("*")) if f.is_file()]
+    last = max((f.stat().st_mtime for f in files), default=None)
+    orch = base.read_json(d / "orchestrator.json", {})
+    waiting = isinstance(orch, dict) and orch.get("mode") == "human" and orch.get("approved") is False
+    return {"name": name, "goal": _goal(_plan(d, project)), "done": len(done), "planned": len(planned),
+            "finished": finished(d), "waiting": waiting,
+            "last": date.fromtimestamp(last).isoformat() if last else None}
+
+
+def describe(info: dict) -> str:
+    """One plain line: name, where it stands, when it was last touched, its goal."""
+    if info["finished"]:
+        where = "finished"
+    elif info["waiting"]:
+        where = "plan waiting for approval"
+    elif info["planned"] and info["done"] == info["planned"]:
+        where = f"all {info['planned']} tasks built, not yet wrapped up"
+    elif info["planned"]:
+        where = f"{info['done']} of {info['planned']} tasks done"
+    else:
+        where = "planning, nothing built yet"
+    when = f", last worked on {info['last']}" if info["last"] else ""
+    goal = f". Goal: {info['goal']}" if info["goal"] else ""
+    return f"{info['name']}: {where}{when}{goal}"
+
+
+def parked(sl: Path) -> list:  # O(P * files)
+    pd = sl / PARKED
+    if not pd.is_dir():
+        return []
+    return [summary(d, sl.parent, d.name) for d in sorted(pd.iterdir()) if d.is_dir()]
+
+
 def switch(sl: Path, want: str) -> list:  # O(S)
     """Make `want` the live topic in run folder `sl`; the lines to print."""
     out = []
@@ -96,8 +164,10 @@ def switch(sl: Path, want: str) -> list:  # O(S)
             out.append(f"session: archived finished run {name} -> {dest.relative_to(sl.parent).as_posix()}")
         else:
             dest = _free(sl / PARKED, name)
-            out.append(f"session: parked open run {name} -> {dest.relative_to(sl.parent).as_posix()}; "
-                       f"`superlite-cli session ensure --slug {name}` brings it back")
+            info = describe(summary(sl, sl.parent, name))
+            out.append(f"session: parked open run {info}. Tell the user in one plain line that this run was set "
+                       f"aside and can be brought back any time, then carry on without waiting. "
+                       f"(`superlite-cli session ensure --slug {dest.name}` brings it back.)")
         _move(sl, dest)
     back = sl / PARKED / want
     if back.is_dir():
@@ -122,12 +192,25 @@ def ensure_in_place(start: Path, want: str) -> int:
 def main(argv=None):  # O(entries)
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("status")
-    ap.parse_args(argv)
+    sub.add_parser("status", help="the live topic and every parked one, one plain line each")
+    sub.add_parser("brief", help="one line for session start, empty when nothing is parked")
+    a = ap.parse_args(argv)
     sl = state.run_dir(Path.cwd())
-    print(f"topic: {current(sl) or 'none'}")
-    parked = sorted(p.name for p in (sl / PARKED).iterdir()) if (sl / PARKED).is_dir() else []
-    print(f"parked: {', '.join(parked) or 'none'}")
+    runs = parked(sl)
+    if a.cmd == "brief":
+        if runs:
+            print("Parked superlite topics (open runs set aside): " + " | ".join(describe(r) for r in runs)
+                  + ". Mention them only when the user starts something new or asks to pick up earlier work; "
+                    "`superlite-cli session ensure --slug <topic>` brings one back.")
+        return 0
+    live = current(sl)
+    if live and entries(sl):
+        print("live: " + describe(summary(sl, sl.parent, live)))
+    else:
+        print("live: none")
+    print("parked:" + ("" if runs else " none"))
+    for r in runs:
+        print("- " + describe(r))
     return 0
 
 

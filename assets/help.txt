@@ -82,10 +82,12 @@
    /superlite:small <change>        Small inline change, with a reviewer.
    /superlite:human                 Switch to the human orchestrator.
    /superlite:ai                    Switch to the AI orchestrator.
-   /superlite:approve [plan]        Approve the review plan so the build runs.
+   /superlite:approve [plan]        Approve the plan so the build runs.
    /superlite:status                Mode, approval, task progress, budget.
    /superlite:stop                  Stop dispatching new tasks, report state.
    /superlite:resume [plan]         Resume an interrupted build.
+   /superlite:topics [topic]        Topics set aside (guard light), in plain
+                                    English; name one to bring it back.
    /superlite:agents [dir]          The agent map pane: who spawned whom,
                                     running, aborted, done; tasks, ledger.
    /superlite:tail [dir]            The same run as a terminal feed, for

@@ -159,6 +159,16 @@ if [ -n "$hud_line" ] && [ "$hud_off" != "1" ]; then
 '"${hud_line}"
 fi
 
+# Guard light: name the parked topics (open runs set aside for another topic) so they can be brought up.
+if [ "$guard_mode" = light ] && [ -d "$proj_dir/.superlite/parked" ]; then
+  parked_line="$(cd "$proj_dir" && "$py" "${PLUGIN_ROOT}/skills/swarm/scripts/topics.py" brief 2>/dev/null || true)"
+  if [ -n "$parked_line" ]; then
+    content="${content}"$'
+
+'"${parked_line}"
+  fi
+fi
+
 # A superlite run suspends peer process plugins. The marker is removed by superlite-cli finish.
 peers_file=".superlite/peers.json"
 if [ -f "$peers_file" ]; then

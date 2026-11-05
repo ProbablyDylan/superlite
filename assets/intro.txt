@@ -38,6 +38,7 @@
    /superlite:resume   pick up again          /superlite:finish  merge or PR,
    /superlite:agents   the agent map                             never pushes
    /superlite:tail     live feed (no mod)
+   /superlite:topics   topics set aside
   SETUP
    /superlite:setup    first-run check
  ------------------------------------------------------------------------------
