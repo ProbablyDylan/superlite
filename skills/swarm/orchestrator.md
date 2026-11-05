@@ -2,11 +2,11 @@
 
 When someone asks superlite to create something, it first settles who orchestrates (D40).
 
-- **Human orchestrator:** the human validates the plan before it is linted and sent off, in two phases. Phase 1: the review plan
-  (`docs/plans/<date>-<topic>.review.md`, plain words with diagrams; template in `../drafting/review-plan.md`) is opened for the user first when `open_in_harness` is on (`superlite-cli agent_specs status`; `superlite:drafting`, After writing), then shown with its
-  path and a five-line summary. The same message offers the read-only agent map, so approval stays the one stop: "Reply
-  approve. Add `map` to watch the run in the agent map pane (`/superlite:agents`: agents, tasks and the ledger)." Phase 2,
-  after the yes: `superlite-cli orchestrator approve --review <path>`, open the map if the reply asked for it (no terminal tail: the map
+- **Human orchestrator:** the human approves an overview before the plan is linted and sent off. Phase 1: the machine plan
+  is written (`docs/plans/<date>-<topic>.md`, for the agents, not opened for the user), then the overview goes out as the chat
+  reply (plain English: goal, approach, what it touches, questions with defaults; `../drafting/review-plan.md`). The same message
+  offers the read-only agent map, so approval stays the one stop: "Reply approve. Add `map` to watch the run in the agent map
+  pane (`/superlite:agents`: agents, tasks and the ledger)." Phase 2, after the yes: `superlite-cli orchestrator approve --review <path>`, open the map if the reply asked for it (no terminal tail: the map
   shows the ledger; `/superlite:tail` only where the mod is not installed), then the coordinator writes the machine plan from
   it (header `**Review plan:** <path>`), `lint --stable`, dispatch.
 - **AI orchestrator:** does everything itself (plan, lint, dispatch, rulings) and never stops to ask, except for the
@@ -27,12 +27,12 @@ unattended signal (all mean AI). When no human can answer (a headless `claude -p
 - `set human|ai [--by NAME] [--ruling TEXT]` writes `.superlite/orchestrator.json` `{mode, approved, by, time}`
   (`approved` is true for AI, false for human until `approve`).
 - `approve --review PATH [--by NAME]` records the approval. Human mode only (exit 2 otherwise); `--review` is required (exit 2: write the
-  review plan first; a missing file also exit 2); and a real human reply is required: `.superlite/human-replies.jsonl` (written only by the
+  plan first; a missing file also exit 2); and a real human reply is required: `.superlite/human-replies.jsonl` (written only by the
   UserPromptSubmit hook, `{t, approves, text}` per human prompt while unapproved) must hold a line later than the review
-  file's modification time, else exit 3 `BLOCKED: no human approval reply since the review plan was written; show the plan, ask the human to
+  file's modification time, else exit 3 `BLOCKED: no human approval reply since the plan was written; send the overview, ask the human to
   reply approve, end your turn`. The coordinator sends `approve` when it understands that reply as approval; the hook's phrase flag does not decide.
   The path and sha256 go to `orchestrator.json` (`review_path`, `review_sha256`). AI mode never needs `approve`.
-  `status [--review PATH]` and `finish` print the review plan path and whether an approving reply exists.
+  `status [--review PATH]` and `finish` print the approved plan's path and whether an approving reply exists.
 - Where the state lives: without `--plan`, `superlite-cli orchestrator` and the hooks use the nearest `.superlite` at or above the working directory that holds an
   `orchestrator.json`, so a shell or session in a subfolder still reads and writes the run the hook records replies for.
 - `status` prints one line: `orchestrator: human, awaiting approval` / `human, approved <time> by <name>` / `AI` / `not set (ungated)`.
@@ -46,7 +46,7 @@ unattended signal (all mean AI). When no human can answer (a headless `claude -p
 ## The hard rule (human mode)
 No orchestrated build starts until the human approves the plan: nothing is linted, dispatched or sent to an agent before the human's
 approving reply. The approval is asked in PLAIN TEXT, never with AskUserQuestion, because the typed reply is what the hook verifies: show
-open the review plan first when `open_in_harness` is on (`superlite:drafting`, After writing), then the review plan path, a five-line summary and "Reply approve to start, or tell me what to change", then end the turn. Read the answer.
+the overview (`../drafting/review-plan.md`) and "Reply approve to start, or tell me what to change", then end the turn. Read the answer.
 If you understand it as approval, send `approve --review`. Do not pass their words through and do not ask them to retype approve.
 If you understand it as changes with no approval, revise and ask again. `set human` writes `approved: false`. The hook (`pre-tool`) denies superlite agent dispatch and the
 build tools while the mode is human and unapproved, and always denies the model writing `orchestrator.json` or `human-replies.jsonl`.
@@ -61,7 +61,7 @@ human reply in `human-replies.jsonl` newer than the prototype's last checkpoint 
 says `tryout`, the hook denies integration dispatch and `lint --stable`, `dispatch`, `wave0`, `build_prime` exit 4, as before plan
 approval. AI mode: the acceptance checks decide, as a `Ruling: [tryout]`.
 
-Small inline work (trivial or bounded, no plan) is not orchestrated: it needs only the human's yes in chat, and no review plan.
+Small inline work (trivial or bounded, no plan) is not orchestrated: it needs only the human's yes in chat, and no overview.
 
 After the approval the run decides on its own, like the AI orchestrator. The human is not asked about scope or interface changes: each
 one is recorded as `Ruling: [scope] <decision> - <why> - <cost if wrong>`, and `superlite-cli finish` lists them under "Changed from the approved

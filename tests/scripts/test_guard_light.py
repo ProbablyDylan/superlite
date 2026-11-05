@@ -144,3 +144,30 @@ def test_guard_cli_set_and_status(tmp_path, monkeypatch):
     prefs = Path(os.environ["SUPERLITE_HOME"]) / "preferences.json"
     assert json.loads(prefs.read_text(encoding="utf-8"))["guard"] == "light"
     assert "guard: strict" in run(GUARD, "set", "strict", cwd=tmp_path).out
+
+
+# ---- the overview flow: the machine plan is written first, then approved by its own path ----
+
+def test_plain_lint_before_approval_does_not_start_a_run(tmp_path):
+    from test_routing import mech_plan
+    p = mech_plan(tmp_path, 2)
+    run(ORCH, "set", "human", "--plan", p, cwd=tmp_path)
+    run(SCRIPTS / "plan_tools.py", "lint", "--plan", p, cwd=tmp_path)
+    sd = tmp_path / ".superlite"
+    assert not any((sd / m).exists() for m in ("stable.json", "prime.md", "pool.json"))
+    assert hrun(tmp_path, "Edit", {"file_path": str(tmp_path / "src" / "a.py")}).returncode == 0
+
+
+def test_approve_takes_the_machine_plan(tmp_path):
+    from test_orchestrator import orch, reply
+    from test_routing import mech_plan
+    p = mech_plan(tmp_path, 2)
+    orch(tmp_path, "set", "human")
+    reply(tmp_path, p)
+    cp = orch(tmp_path, "approve", "--review", p)
+    assert cp.returncode == 0, cp.both
+    st = json.loads((tmp_path / ".superlite" / "orchestrator.json").read_text(encoding="utf-8"))
+    assert st["approved"] is True and st["review_path"].endswith(p.name)
+    lint = run(SCRIPTS / "plan_tools.py", "lint", "--stable", "--plan", p, cwd=tmp_path)
+    assert lint.returncode != 4 and "BLOCKED" not in lint.both
+

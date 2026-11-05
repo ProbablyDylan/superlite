@@ -9,7 +9,7 @@ from test_plan_tools import SCRIPTS, run
 from test_routing import mech_plan
 
 ORCH = SCRIPTS / "orchestrator.py"
-NO_REPLY = ("BLOCKED: no human approval reply since the review plan was written; show the plan, ask the human to reply approve, "
+NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human to reply approve, "
             "end your turn")
 BLOCK = "BLOCKED: human orchestrator selected, show the plan, ask for approval, then run superlite-cli orchestrator approve"
 
@@ -165,7 +165,7 @@ def test_approve_refuses_without_review(tmp_path):
     f = review_file(tmp_path)
     reply(tmp_path, f)  # even with a fresh approving reply
     cp = orch(tmp_path, "approve", "--by", "frank")
-    assert cp.returncode == 2 and "write the review plan first" in cp.err
+    assert cp.returncode == 2 and "write the plan and send the overview first" in cp.err
     assert state(tmp_path)["approved"] is False
 
 
@@ -182,7 +182,7 @@ def test_approve_refuses_a_stale_reply_older_than_the_review_plan(tmp_path):
     f = review_file(tmp_path)
     reply(tmp_path, f, offset_ms=-60_000)  # the human said approve before the plan was (re)written
     cp = orch(tmp_path, "approve", "--review", f)
-    assert cp.returncode == 3 and "no human approval reply since the review plan was written" in cp.err
+    assert cp.returncode == 3 and "no human approval reply since the plan was written" in cp.err
     assert "no qualifying human reply yet" in orch(tmp_path, "status", "--review", f).out
 
 

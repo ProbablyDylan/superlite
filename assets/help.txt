@@ -32,15 +32,16 @@
  WHO DECIDES
 
    Human orchestrator  (/superlite:human)
-     You get a plain-language review plan with diagrams, a rough time and
-     cost. Nothing is linted, dispatched or sent to an agent until you reply
-     "approve" (then /superlite:approve runs, or superlite runs it). After
+     You get a plain-English overview in chat: goal, approach, what it
+     touches, questions. Nothing is linted, dispatched or sent to an
+     agent until you reply "approve" (then /superlite:approve runs, or
+     superlite runs it). After
      that you are not asked again: any change to scope is recorded as a
      ruling and listed at the end under "Changed from the approved plan".
      Small inline work needs only your "yes" in chat.
 
    AI orchestrator  (/superlite:ai, or say "decide yourself")
-     No review plan and no questions. Open choices become recorded rulings.
+     No overview and no questions. Open choices become recorded rulings.
 
    Both modes stop for destructive, outward (push, merge, publish) or
    security-sensitive actions: AI mode defers them and lists them.
@@ -50,7 +51,7 @@
 
    1. Plan        Opus writes the design and the task graph: tasks, the files
                   each owns, interfaces, examples, sizes.
-   2. Approve     Human mode only: you approve the review plan.
+   2. Approve     Human mode only: you approve the overview.
    3. Lint        `lint --stable` checks the plan. Stable tasks go out at
                   once; tasks marked FIX are patched and sent when stable.
    4. Wave 0      Haiku builds the skeleton and stubs first.
@@ -121,7 +122,7 @@
  ------------------------------------------------------------------------------
  WHERE THINGS ARE
 
-   docs/plans/<date>-<topic>.md          the plan (.review.md in human mode,
+   docs/plans/<date>-<topic>.md          the agents' plan (also
                                          .mvp.md in MVP mode, .feature.md in
                                          feature mode)
    .superlite/feature.json               feature mode: the prototype's

@@ -4,10 +4,10 @@
 #     .superlite/feature.json (changed only by `superlite-cli proto`) and .superlite/human-replies.jsonl (written
 #     only by hooks/prompt) are never written by the model.
 #  2. HUMAN-UNAPPROVED (.superlite/orchestrator.json has mode human and approved false): nothing is
-#     orchestrated until the human approves the review plan. Agent calls are denied, except Explore, Plan, the
+#     orchestrated until the human approves the plan. Agent calls are denied, except Explore, Plan, the
 #     guide agents and (not in Cursor) an agent that cannot write files (see agent_read_only), and so are
 #     superlite-cli dispatch/assign/wave0/checkpoint/finish/build_prime. File writes are not: small inline
-#     work needs only the human's yes in chat, not a review plan.
+#     work needs only the human's yes in chat, not a plan.
 #     TRYOUT-PENDING (feature flow: mode human and .superlite/feature.json has status tryout) is the
 #     same denial, for the integration build, until `superlite-cli proto tryout --approve` records the try-out.
 #  3. Active run (.superlite/stable.json, prime.md or pool.json exists): project code is not written
@@ -517,7 +517,7 @@ nl=$'\n'
 if [ "$prot" = 1 ]; then
   msg='Blocked: .superlite/orchestrator.json, .superlite/feature.json and .superlite/human-replies.jsonl are never written directly. Change the orchestrator state only with `superlite-cli orchestrator ...` (for example `superlite-cli orchestrator approve --review <path>`) and the prototype state only with `superlite-cli proto ...`; human-replies.jsonl is written only by the hook that records the human'"'"'s replies.'
 elif [ "$human" = 1 ]; then
-  msg='Human orchestrator: no build is orchestrated until the human approves the plan. Write the review plan docs/plans/<date>-<topic>.review.md (see skills/drafting/review-plan.md), show its path with a five-line summary, ask the human to reply approve, end your turn, then run superlite-cli orchestrator approve --review <path>. Small inline work without a plan needs only the human'"'"'s yes in chat. Agents with no Edit, Write or shell tools (read-only reviewers and scanners) may run.'
+  msg='Human orchestrator: no build is orchestrated until the human approves the plan. Write the plan docs/plans/<date>-<topic>.md, reply with the plain-English overview (see skills/drafting/review-plan.md), ask the human to reply approve, end your turn, then run superlite-cli orchestrator approve --review <plan path>. Small inline work without a plan needs only the human'"'"'s yes in chat. Agents with no Edit, Write or shell tools (read-only reviewers and scanners) may run.'
 elif [ "$tryout" = 1 ] && [ "$gatehit" = 1 ]; then
   msg='Feature flow: the integration build waits for the human'"'"'s try-out of the prototype. Show how to try it (`superlite-cli proto tryout`), ask the human to reply "it works" or list changes, end your turn, then run `superlite-cli proto tryout --approve`. Changes go back to the prototype: `superlite-cli proto start --topic <topic>` reopens it for a fix round. Agents with no Edit, Write or shell tools (read-only reviewers and scanners) may run.'
 elif [ "$batchhit" = 1 ]; then

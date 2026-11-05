@@ -1,7 +1,7 @@
 ---
-description: Approve the review plan so superlite can lint and build it.
-argument-hint: "[path to the .review.md]"
+description: Approve the plan so superlite can lint and build it.
+argument-hint: "[path to the plan]"
 ---
 
-Approve the human review plan. Arguments: $ARGUMENTS
-Use the given path, else the newest `docs/plans/*.review.md`. When `open_in_harness` is on (`superlite-cli agent_specs status`), open the review plan for the user first (`superlite:drafting`, After writing). Show the user a five-line summary of what they are approving and ask only if the intent is unclear. Read their reply. If you understand it as approval, send approve: `superlite-cli orchestrator approve --review <path>`. Do not pass their sentence through and do not ask them to type the word approve. If you do not understand it as approval, ask what to change and end the turn. After approve succeeds, rewrite the plan in the agent format, lint it, and start the build.
+Approve the plan. Arguments: $ARGUMENTS
+Use the given path, else the newest plan in `docs/plans/`. Do not open it for the user. If they have not seen the overview yet, reply with it (`skills/drafting/review-plan.md`) and end the turn. Read their reply. If you understand it as approval, send approve: `superlite-cli orchestrator approve --review <path>`. Do not pass their sentence through and do not ask them to type the word approve. If you do not understand it as approval, ask what to change and end the turn. After approve succeeds, make any small changes they asked for, lint the plan with `--stable`, and start the build.

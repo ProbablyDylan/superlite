@@ -34,9 +34,9 @@ import state  # noqa: E402
 
 FILE = "orchestrator.json"
 REPLIES = "human-replies.jsonl"  # written only by the UserPromptSubmit hook
-NO_REPLY = ("BLOCKED: no human approval reply since the review plan was written; show the plan, ask the human to reply approve, "
+NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human to reply approve, "
             "end your turn")
-NO_REVIEW = "BLOCKED: write the review plan first, then approve --review <path>"
+NO_REVIEW = "BLOCKED: write the plan and send the overview first, then approve --review <plan path>"
 EXIT_BLOCKED = 4  # exit 3 already means "no Python" for sl
 FEATURE = "feature.json"  # written only by `superlite-cli proto`
 TRYOUT_BLOCK = ("BLOCKED: the human has not approved the prototype try-out; show it (superlite-cli proto tryout), ask the human to reply "
@@ -185,7 +185,7 @@ def main(argv=None):
     s.add_argument("--ruling", help=f"with ai: also record a Ruling: line in {_dir_name()}/progress.md")
     a_ = sub.add_parser("approve")
     a_.add_argument("--by", default="human")
-    a_.add_argument("--review", help="the approved review plan (docs/plans/<date>-<topic>.review.md): path and sha256 are recorded")
+    a_.add_argument("--review", help="the approved plan (docs/plans/<date>-<topic>.md, or the .feature.md/.mvp.md of those flows): path and sha256 are recorded")
     st = sub.add_parser("status")
     st.add_argument("--review", help="review plan path: status says whether a reply newer than it approves")
     for p in (s, a_, st):

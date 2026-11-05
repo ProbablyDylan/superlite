@@ -32,7 +32,7 @@ Each run starts its own session automatically (`superlite-cli session ensure`): 
 | **Debug** | "This test fails on leap days: find the root cause and fix it" | `diagnosis` finds the cause first; fixes go to fix-only agents by tier, each leaving a note, and escalate after two failed rounds |
 | **A small change** | "Rename `build` to `render` everywhere" | Small work stays inline, with a reviewer always |
 | **Review and harden** | "Review this branch and fix what you find" | Package reviewers fix their own findings; the final reviewer reports findings with tiers and never edits |
-| **You approve first** | "Build X. I will approve the plan" | A human orchestrator: you get a plain-language review plan with diagrams; nothing runs until you say yes |
+| **You approve first** | "Build X. I will approve the plan" | A human orchestrator: you get a plain-English overview in chat; nothing runs until you say yes |
 | **Hands off** | "Build X. I am away, decide yourself" | The AI orchestrator plans, lints, dispatches and rules on open choices without stopping |
 | **Ship it** | "We are done: finish the branch" | Verification first, then merge or PR options. It never pushes without you |
 
@@ -55,8 +55,8 @@ Plain words work just as well; the commands are shortcuts.
 
 ### Who orchestrates
 
-- **Human orchestrator.** You get a plain-language review plan with diagrams (a `.review.md`, about two pages, with a rough time and cost), and nothing is linted, dispatched or sent to an agent until you reply approve. Any clear approval counts (yes, go ahead, looks good, or similar), including a longer note. After that you are not asked again: any change to scope is recorded as a ruling and listed at the end under "Changed from the approved plan". Small inline work needs only your yes in chat.
-- **AI orchestrator.** It plans, lints, dispatches and rules on open choices itself, with no review plan and no questions.
+- **Human orchestrator.** You get a plain-English overview as a chat reply (goal, approach, what it touches, questions with defaults; the detailed plan stays in `docs/plans/` for the agents), and nothing is linted, dispatched or sent to an agent until you reply approve. Any clear approval counts (yes, go ahead, looks good, or similar), including a longer note. After that you are not asked again: any change to scope is recorded as a ruling and listed at the end under "Changed from the approved plan". Small inline work needs only your yes in chat.
+- **AI orchestrator.** It plans, lints, dispatches and rules on open choices itself, with no overview and no questions, and ends with a plain-English summary of what changed and the calls it made.
 
 Both stop for destructive, outward (push, merge, publish) or security-sensitive actions, and superlite never commits during a run: finished tasks are hidden checkpoints. A checkpoint is a hidden save of one task under `refs/superlite/*`. At session end, shipping asks once: "Commit to <session branch>" or "Leave uncommitted".
 
@@ -133,7 +133,7 @@ And it is not tied to one language. A TypeScript site generator went from spec t
 
 ## More
 
-How it works, in [docs/](docs/): [how a run works](docs/how-a-run-works.md) · [skills and agents](docs/skills-and-agents.md) · [hooks](docs/hooks.md) · [tools](docs/tools.md) · [config](docs/config.md) · [language support](docs/language.md) · [how the rules are enforced](docs/gates.md) · [an example review plan](docs/example-review-plan.md). Installation for other harnesses, the benchmark harness and the task list follow below.
+How it works, in [docs/](docs/): [how a run works](docs/how-a-run-works.md) · [skills and agents](docs/skills-and-agents.md) · [hooks](docs/hooks.md) · [tools](docs/tools.md) · [config](docs/config.md) · [language support](docs/language.md) · [how the rules are enforced](docs/gates.md). Installation for other harnesses, the benchmark harness and the task list follow below.
 
 ---
 
