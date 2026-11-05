@@ -28,6 +28,8 @@ How much the hooks hold the main session back. `superlite-cli guard set light|st
 | Killing processes by name or pattern (`pkill`, `killall`, `taskkill /IM`) | denied: kill by PID | allowed; only `kill -9 -1` is denied |
 | `superlite-cli session ensure` | cuts a session branch, or a worktree beside an open run | works in place on the current branch |
 | Shipping | merge, pull request or keep the session branch | commit here or leave uncommitted |
+| Session start in a project with no `.superlite/` | the full superlite bootstrap (start menu, sizing, orchestrator question) | one line: superlite is installed but not in use here |
 
 The feature flow's prototype still builds in its own throwaway worktree in both modes.
 
+In both modes the hooks look for a run at or above the working directory but never above a checkout root (a folder with `.git`), the same rule as the scripts, so a run in one repo never governs another.

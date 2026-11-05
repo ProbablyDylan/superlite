@@ -182,9 +182,11 @@ fi
 root="${root//\\//}"
 
 # up_to_run DIR: the nearest folder at or above DIR that holds .superlite/orchestrator.json, else DIR, into UP.
+# The walk stops at a checkout root (a folder with .git), as orchestrator.sl_dir does: a run never governs another repo.
 up_to_run() {
   local d="$1" up
   while [ ! -f "$d/.superlite/orchestrator.json" ]; do
+    [ -e "$d/.git" ] && { UP="$1"; return 0; }
     up="${d%/*}"; { [ -z "$up" ] || [ "$up" = "$d" ]; } && { UP="$1"; return 0; }; d="$up"
   done
   UP="$d"

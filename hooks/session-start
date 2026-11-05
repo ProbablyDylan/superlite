@@ -18,6 +18,48 @@ escape_for_json() {
     printf '%s' "$s"
 }
 
+emit() {
+  local session_context="$1"
+  # Emit only the field the current platform consumes:
+  # - Cursor sets CURSOR_PLUGIN_ROOT (and may also set CLAUDE_PLUGIN_ROOT) and expects additional_context (snake_case).
+  # - Claude Code sets CLAUDE_PLUGIN_ROOT without COPILOT_CLI or MUSE_PLUGIN_ROOT and expects
+  #   hookSpecificOutput.additionalContext (nested). It reads BOTH forms without deduplication, so never emit both.
+  # - Muse sets MUSE_PLUGIN_ROOT; it accepts the Claude-style nested output.
+  # - Copilot CLI (sets COPILOT_CLI=1) and unknown hosts expect top-level additionalContext (SDK standard).
+  # printf only (no heredoc) to avoid the bash 5.3+ heredoc hang.
+  if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+    printf '{"additional_context":"%s"}\n' "$session_context"
+  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ] && [ -z "${MUSE_PLUGIN_ROOT:-}" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$session_context"
+  elif [ -n "${MUSE_PLUGIN_ROOT:-}" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$session_context"
+  else
+    printf '{"additionalContext":"%s"}\n' "$session_context"
+  fi
+}
+
+# Guard light (same setting as hooks/_preamble and skills/swarm/scripts/guard.py): outside a superlite project (no
+# .superlite folder in the project), say only that superlite exists, so other projects keep their own way of working.
+proj_dir="${CLAUDE_PROJECT_DIR:-${CURSOR_PROJECT_DIR:-$PWD}}"
+guard_mode="${SUPERLITE_GUARD:-}"
+if [ -z "$guard_mode" ]; then
+  re_abs_g='^/'
+  case ${OSTYPE:-} in msys*|cygwin*|win*) re_abs_g='^(/|[A-Za-z]:[\\/])' ;; esac
+  if [ -n "${SUPERLITE_HOME:-}" ]; then g_home="$SUPERLITE_HOME"
+  elif [[ ${XDG_DATA_HOME:-} =~ $re_abs_g ]]; then g_home="${XDG_DATA_HOME}/superlite"
+  else g_home="${HOME:-}/.local/share/superlite"
+  fi
+  if [ -n "${HOME:-}${SUPERLITE_HOME:-}" ] && [ -f "$g_home/preferences.json" ]; then
+    IFS= read -r -d '' g_body < "$g_home/preferences.json" || true
+    re_guard='"guard"[[:space:]]*:[[:space:]]*"([A-Za-z]+)"'
+    [[ ${g_body:-} =~ $re_guard ]] && guard_mode="${BASH_REMATCH[1]}"
+  fi
+fi
+if [ "$guard_mode" = light ] && [ ! -d "$proj_dir/.superlite" ]; then
+  emit "superlite is installed but not in use in this project. Work as you normally would; do not load superlite skills, show its start menu or ask about orchestrators unless the user runs a /superlite: command or asks for superlite."
+  exit 0
+fi
+
 # Interpreter for the helper scripts: $SUPERLITE_PYTHON, else python, else python3 (builtin probe, no spawn).
 py="${SUPERLITE_PYTHON:-}"
 if [ -z "$py" ]; then
@@ -132,21 +174,6 @@ fi
 escaped=$(escape_for_json "$content")
 session_context="You have superlite. Its 'superlite:using-superlite' skill follows; load other skills with the Skill tool.\n\n${escaped}"
 
-# Emit only the field the current platform consumes:
-# - Cursor sets CURSOR_PLUGIN_ROOT (and may also set CLAUDE_PLUGIN_ROOT) and expects additional_context (snake_case).
-# - Claude Code sets CLAUDE_PLUGIN_ROOT without COPILOT_CLI or MUSE_PLUGIN_ROOT and expects
-#   hookSpecificOutput.additionalContext (nested). It reads BOTH forms without deduplication, so never emit both.
-# - Muse sets MUSE_PLUGIN_ROOT; it accepts the Claude-style nested output.
-# - Copilot CLI (sets COPILOT_CLI=1) and unknown hosts expect top-level additionalContext (SDK standard).
-# printf only (no heredoc) to avoid the bash 5.3+ heredoc hang.
-if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
-  printf '{"additional_context":"%s"}\n' "$session_context"
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ] && [ -z "${MUSE_PLUGIN_ROOT:-}" ]; then
-  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$session_context"
-elif [ -n "${MUSE_PLUGIN_ROOT:-}" ]; then
-  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$session_context"
-else
-  printf '{"additionalContext":"%s"}\n' "$session_context"
-fi
+emit "$session_context"
 
 exit 0

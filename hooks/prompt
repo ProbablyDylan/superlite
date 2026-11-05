@@ -31,7 +31,7 @@ compact_nudge
 # The HUD and the cost line read the folder the host names (proj0), not the run found above it.
 hud=""
 hud_script="$root/skills/swarm/scripts/session_hud.py"
-if [ "${SUPERLITE_NO_SESSION_HUD:-}" != "1" ] && [ -f "$hud_script" ] && { [ -d "$proj0/.superlite" ] || [ -f "$proj0/.git" ]; }; then
+if [ "${SUPERLITE_NO_SESSION_HUD:-}" != "1" ] && [ -f "$hud_script" ] && { [ -d "$proj0/.superlite" ] || { [ "$light" = 0 ] && [ -f "$proj0/.git" ]; }; }; then
   hud="$("$py" "$hud_script" "$proj0" 2>/dev/null)" || hud=""
 fi
 cost=""
