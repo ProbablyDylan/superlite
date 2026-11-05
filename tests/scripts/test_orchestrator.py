@@ -9,7 +9,7 @@ from test_plan_tools import SCRIPTS, run
 from test_routing import mech_plan
 
 ORCH = SCRIPTS / "orchestrator.py"
-NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human to reply approve, "
+NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human for a go-ahead in their own words, "
             "end your turn")
 BLOCK = "BLOCKED: human orchestrator selected, show the plan, ask for approval, then run superlite-cli orchestrator approve"
 

@@ -34,7 +34,7 @@
    Human orchestrator  (/superlite:human)
      You get a plain-English overview in chat: goal, approach, what it
      touches, questions. Nothing is linted, dispatched or sent to an
-     agent until you reply "approve" (then /superlite:approve runs, or
+     agent until you say yes in any words (then /superlite:approve runs, or
      superlite runs it). After
      that you are not asked again: any change to scope is recorded as a
      ruling and listed at the end under "Changed from the approved plan".

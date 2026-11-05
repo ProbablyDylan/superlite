@@ -10,7 +10,7 @@ document to open. The plan files are for the agents; the human reads only the ov
    what it reports, so the overview describes a plan that holds. Do not run `lint --stable`, `dispatch`, `wave0` or
    `build_prime`: they refuse until the approval.
 2. Reply with the overview below, in plain text (not AskUserQuestion, not a file, do not open the plan for the user),
-   ending with "Reply approve to start, or tell me what to change." END THE TURN.
+   ending with "Say go ahead in any words to start, or tell me what to change." END THE TURN.
 3. Read the answer.
    - Approval, alone or with small changes that keep the approach: send
      `superlite-cli orchestrator approve --review <plan path>` first (it needs the human's reply to be newer than the
@@ -32,7 +32,7 @@ can be a few lines, a large one a few paragraphs per part. Do not pad and do not
 - **Touches:** the areas of the project it changes: modules, data, assets, tools. A folder or file name is fine when it
   helps the human see the reach; never line numbers.
 - **Questions:** only choices the human should make, each with your default: `Grade width for small lakes: narrower
-  than the bay (default) | the same`. "Approve" accepts every default. With none, write "None."
+  than the bay (default) | the same`. A go-ahead accepts every default. With none, write "None."
 
 Add these only when they matter for this work: what it will not do, risks worth knowing, how the human will be able to
 check it worked, anything that needs them later (a test in game, a name to choose).

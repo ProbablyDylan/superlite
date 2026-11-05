@@ -163,7 +163,7 @@
     a.href = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
     a.download = 'mvp-feedback.json';
     document.body.appendChild(a); a.click(); a.remove();
-    status('Downloaded mvp-feedback.json. Reply approve in chat, or say what to change.');
+    status('Downloaded mvp-feedback.json. Say go ahead in chat, or say what to change.');
   }
 
   $('sl-save').onclick = function () {
@@ -172,7 +172,7 @@
     window.showSaveFilePicker({suggestedName: 'mvp-feedback.json', types: [{description: 'JSON', accept: {'application/json': ['.json']}}]})
       .then(function (h) { return h.createWritable(); })
       .then(function (w) { return w.write(text).then(function () { return w.close(); }); })
-      .then(function () { status('Saved. Reply approve in chat, or say what to change.'); },
+      .then(function () { status('Saved. Say go ahead in chat, or say what to change.'); },
             function (e) { if (!e || e.name !== 'AbortError') download(text); });
   };
   $('sl-copy').onclick = function () {

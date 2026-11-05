@@ -34,7 +34,7 @@ import state  # noqa: E402
 
 FILE = "orchestrator.json"
 REPLIES = "human-replies.jsonl"  # written only by the UserPromptSubmit hook
-NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human to reply approve, "
+NO_REPLY = ("BLOCKED: no human approval reply since the plan was written; send the overview, ask the human for a go-ahead in their own words, "
             "end your turn")
 NO_REVIEW = "BLOCKED: write the plan and send the overview first, then approve --review <plan path>"
 EXIT_BLOCKED = 4  # exit 3 already means "no Python" for sl

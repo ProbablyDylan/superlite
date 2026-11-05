@@ -55,7 +55,7 @@ Plain words work just as well; the commands are shortcuts.
 
 ### Who orchestrates
 
-- **Human orchestrator.** You get a plain-English overview as a chat reply (goal, approach, what it touches, questions with defaults; the detailed plan stays in `docs/plans/` for the agents), and nothing is linted, dispatched or sent to an agent until you reply approve. Any clear approval counts (yes, go ahead, looks good, or similar), including a longer note. After that you are not asked again: any change to scope is recorded as a ruling and listed at the end under "Changed from the approved plan". Small inline work needs only your yes in chat.
+- **Human orchestrator.** You get a plain-English overview as a chat reply (goal, approach, what it touches, questions with defaults; the detailed plan stays in `docs/plans/` for the agents), and nothing is linted, dispatched or sent to an agent until you say yes in any words. Any clear approval counts (yes, go ahead, looks good, or similar), including a longer note. After that you are not asked again: any change to scope is recorded as a ruling and listed at the end under "Changed from the approved plan". Small inline work needs only your yes in chat.
 - **AI orchestrator.** It plans, lints, dispatches and rules on open choices itself, with no overview and no questions, and ends with a plain-English summary of what changed and the calls it made.
 
 Both stop for destructive, outward (push, merge, publish) or security-sensitive actions, and superlite never commits during a run: finished tasks are hidden checkpoints. A checkpoint is a hidden save of one task under `refs/superlite/*`. At session end, shipping asks once: "Commit to <session branch>" or "Leave uncommitted".
