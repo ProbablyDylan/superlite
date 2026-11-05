@@ -13,7 +13,8 @@
 #  3. Active run (.superlite/stable.json, prime.md or pool.json exists): project code is not written
 #     by the coordinator; allowed targets are docs/plans/**, SPEC*.md, docs/**/*.md, .agents/**, spikes/**/*.md,
 #     a Markdown file at the project root (README.md) and .superlite/** except .superlite/sandboxes/** (the
-#     feature prototype's worktree is project code too). Other Markdown (skills/**/SKILL.md, agents/*.md) is
+#     feature prototype's worktree is project code too). Guard light (hooks/_preamble) turns this rule off, and
+#     narrows rule 2's agent denial to superlite:*, implementer and fixer agents. Other Markdown (skills/**/SKILL.md, agents/*.md) is
 #     product code in a plugin repo. In Bash a relative target is read from the project root, or from the folder
 #     of a `cd DIR` before it (DIR plain text: no $, ~, quotes or ..). After a cd the hook cannot follow (cd ..,
 #     cd -P, pushd, a cd in ( ) or { }), a relative target gets none of the new allow rules. A path with a . or
@@ -157,7 +158,8 @@ fi
 gated=0; gatehit=0
 { [ "$human" = 1 ] || [ "$tryout" = 1 ]; } && gated=1
 enforce=0
-[ "$active" = 1 ] && enforce=1   # human-unapproved alone blocks orchestration, not file writes
+[ "$active" = 1 ] && [ "$light" = 0 ] && enforce=1   # human-unapproved alone blocks orchestration, not file writes
+cg=$enforce   # 1: project code is the coordinator's to dispatch, not to write (off in guard light)
 
 batchhit=0
 if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
@@ -167,7 +169,10 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
   *)
     if [ "$gated" = 1 ]; then
       # An agent that cannot write files cannot build. Cursor keeps its agents elsewhere: it keeps the denial.
-      if [ "$cursor" = 1 ] || ! agent_read_only "$st"; then hit="Agent ${st:-general-purpose}"; gatehit=1; fi
+      # Guard light: the gate holds only superlite's own build agents; other work goes on while a plan waits.
+      if [ "$light" = 1 ]; then
+        case "$st" in superlite:*|*implementer*|*Implementer*|*fixer*|*Fixer*) hit="Agent $st"; gatehit=1 ;; esac
+      elif [ "$cursor" = 1 ] || ! agent_read_only "$st"; then hit="Agent ${st:-general-purpose}"; gatehit=1; fi
     elif [ "$active" = 1 ]; then
       jstr prompt; pr="$REPLY"
       [ -n "$pr" ] || { jstr description; pr="$REPLY"; }
@@ -305,10 +310,10 @@ project_code() {
   case "$pl" in .superlite/human-replies.jsonl|.superlite/orchestrator.json|.superlite/feature.json) prot=1; return 0 ;; esac
   case "$pl" in ./*|*/./*|*/.|*/..|*/../*)   # a . or .. component: the real file is not worked out, so fail closed
     case "$pl" in *.superlite*/human-replies.jsonl|*.superlite*/orchestrator.json|*.superlite*/feature.json) prot=1; return 0 ;; esac
-    [ "$active" = 1 ] && return 0
+    [ "$cg" = 1 ] && return 0
     return 1 ;;
   esac
-  [ "$active" = 1 ] || return 1
+  [ "$cg" = 1 ] || return 1
   case "$rel" in
     .superlite/sandboxes/*) return 0 ;;
     docs/plans/*|docs/*.md|SPEC*.md|*/SPEC*.md|.superlite/*) return 1 ;;

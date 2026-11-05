@@ -449,7 +449,7 @@ Analysis scripts:
 
 ## Note
 
-While a superlite run is in progress, superpowers is suspended (`superlite-cli orchestrator set` writes `.superlite/peers.json` and, on Claude Code, turns `superpowers@claude-plugins-official` off in `.claude/settings.local.json`). The lifecycle skills are named `inventing`, `drafting`, `swarm`, `testing`, `diagnosis`, `proof`, and `shipping`, so a short-name lookup does not open the superpowers file. Both plugins still inject a session bootstrap. `superlite-cli finish` removes the marker and restores the previous setting, so superpowers or anything like it can be used again.
+While a superlite run is in progress, superpowers is suspended (`superlite-cli orchestrator set` writes `.superlite/peers.json` and, on Claude Code, turns `superpowers@claude-plugins-official` off in `.claude/settings.local.json`). The lifecycle skills are named `inventing`, `drafting`, `swarm`, `testing`, `diagnosis`, `proof`, and `shipping`, so a short-name lookup does not open the superpowers file. Both plugins still inject a session bootstrap. `superlite-cli finish` removes the marker and restores the previous setting, so superpowers or anything like it can be used again. With the guard set to `light` (see [Config](docs/config.md#guard-mode)), nothing is suspended.
 
 ## License
 

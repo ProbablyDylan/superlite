@@ -215,6 +215,33 @@ up_to_run "$proj"; proj="$UP"
 if [ -n "$in_cwd" ]; then up_to_run "$in_cwd"; [ -f "$UP/.superlite/orchestrator.json" ] && proj="$UP"; fi
 sd="$proj/.superlite"
 
+# A build run is on while a run marker is newer than .superlite/run.finished (written by superlite-cli finish).
+# The markers stay after a run for its report; the next run rewrites them, which makes them newer again.
 active=0
-{ [ -f "$sd/stable.json" ] || [ -f "$sd/prime.md" ] || [ -f "$sd/pool.json" ]; } && active=1
+for mk in "$sd/stable.json" "$sd/prime.md" "$sd/pool.json"; do
+  [ -f "$mk" ] && [ "$mk" -nt "$sd/run.finished" ] && { active=1; break; }
+done
+
+# Guard mode: SUPERLITE_GUARD, else "guard" in preferences.json in the superlite home; strict unless it says light.
+# light: the coordinator may write project code, a closed human gate holds only superlite's own build agents and
+# commands, and peer plugins are not suspended. Protected state files and the batch checks stay in every mode.
+# Python reads the same setting with guard.mode() in skills/swarm/scripts/guard.py: change both together.
+light=0
+guard_mode="${SUPERLITE_GUARD:-}"
+if [ -z "$guard_mode" ]; then
+  # The home is the rule of history.home() in skills/swarm/scripts/history.py (also in hooks/session-start).
+  re_abs='^/'
+  case ${OSTYPE:-} in msys*|cygwin*|win*) re_abs='^(/|[A-Za-z]:[\\/])' ;; esac
+  if [ -n "${SUPERLITE_HOME:-}" ]; then slhome="$SUPERLITE_HOME"
+  elif [[ ${XDG_DATA_HOME:-} =~ $re_abs ]]; then slhome="${XDG_DATA_HOME}/superlite"
+  else slhome="${HOME:-}/.local/share/superlite"
+  fi
+  prefs="$slhome/preferences.json"
+  if [ -n "${HOME:-}${SUPERLITE_HOME:-}" ] && [ -f "$prefs" ]; then
+    IFS= read -r -d '' pj < "$prefs" || true
+    re_guard='"guard"[[:space:]]*:[[:space:]]*"([A-Za-z]+)"'
+    [[ $pj =~ $re_guard ]] && guard_mode="${BASH_REMATCH[1]}"
+  fi
+fi
+[ "$guard_mode" = light ] && light=1
 true

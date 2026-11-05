@@ -31,6 +31,7 @@ PEER_ID = "superpowers@claude-plugins-official"  # the installed Claude Code plu
 PEER_NAME = "superpowers"
 SUSPENDED = "peers: suspended superpowers until this run finishes"
 CLEAR = "peers: clear (superpowers may be used again)"
+NOT_SUSPENDED = "peers: not suspended (guard light)"
 
 
 def peers_path(plan_or_dir=None) -> Path:
@@ -112,7 +113,10 @@ def write_enabled(plan_or_dir, value) -> None:  # O(S)
 
 
 def suspend(plan_or_dir=None) -> str:  # O(S)
-    """Mark peer plugins suspended. A second call keeps the saved previous flag."""
+    """Mark peer plugins suspended. A second call keeps the saved previous flag. Guard light suspends nothing."""
+    import guard
+    if guard.light():
+        return NOT_SUSPENDED
     d = orchestrator.sl_dir(plan_or_dir)
 
     def mark(cur):

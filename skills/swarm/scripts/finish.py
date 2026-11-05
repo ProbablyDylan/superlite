@@ -258,6 +258,10 @@ def main(argv=None):  # O(R*w + I*w)
     except Exception:
         pass
     print(exclusive.release(sl_dir))
+    try:  # the run markers stay for reports; this mark tells the hooks the run is over
+        (sl_dir / "run.finished").write_text(datetime.now().isoformat(timespec="seconds") + "\n", encoding="utf-8")
+    except OSError:
+        pass
     if widget:
         print(widget)
     return 0
