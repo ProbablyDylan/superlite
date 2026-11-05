@@ -27,6 +27,8 @@ Prepare: branch, base, commits ahead (`git log --oneline <base>..HEAD`), `git di
 
 ## 4. Decide
 
+**Guard light** (`superlite-cli guard status` says light): there is no session branch. Ask ONE question, "Commit here on <current branch>" / "Leave uncommitted", and act on it. No merge, PR or session close unless the human asks for one; skip steps 5 to 7.
+
 **Attended:** ask ONE question with AskUserQuestion, three options, with the summary in the question text:
 
 1. Merge locally into the base branch

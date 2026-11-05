@@ -171,3 +171,32 @@ def test_approve_takes_the_machine_plan(tmp_path):
     lint = run(SCRIPTS / "plan_tools.py", "lint", "--stable", "--plan", p, cwd=tmp_path)
     assert lint.returncode != 4 and "BLOCKED" not in lint.both
 
+
+
+# ---- light: kill guard and sessions ----
+
+def test_light_allows_kill_by_name(tmp_path, light):
+    for cmd in ("pkill -f 'java.*minecraft'", "killall node", "pgrep -f vite | xargs kill"):
+        assert hbash(tmp_path, cmd).returncode == 0, cmd
+    for cmd in ("kill -9 -1", "kill -s KILL -1"):
+        assert hbash(tmp_path, cmd).returncode == 2, cmd
+
+
+def test_strict_still_blocks_kill_by_name(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPERLITE_GUARD", raising=False)
+    assert hbash(tmp_path, "killall node").returncode == 2
+
+
+def test_light_session_ensure_works_in_place(tmp_path, light):
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["init", "-q", "-b", "main"], ["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "i"]):
+        subprocess.run(["git", *cmd], cwd=repo, check=True)
+    cp = run(SCRIPTS / "session.py", "ensure", "--slug", "demo", cwd=repo)
+    assert cp.returncode == 0, cp.both
+    assert "guard light" in cp.out and f"SESSION worktree={repo.as_posix()}" in cp.out
+    branches = subprocess.run(["git", "branch", "--format=%(refname:short)"], cwd=repo, capture_output=True, text=True).stdout.split()
+    assert branches == ["main"]
+    wts = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout.strip().splitlines()
+    assert len(wts) == 1

@@ -115,6 +115,11 @@ guard_kill() {
     gp_pipe=1
   fi
   local re_kill="(^|$w)taskkill($w.*)?[[:space:]]//?fi($w|\$)|(^|$w)kill[[:space:]]+(-s[[:space:]]+(kill|9)|-(kill|sigkill|9))[[:space:]]+-1([^0-9]|\$)|(^|$w)taskkill($w.*)?[[:space:]]//?im($w|\$)|(^|$w)(pkill|killall)($w|\$)|(^|$w)stop-process($w.*)?[[:space:]]-name($w|\$)|(^|$w)kill[[:space:]]+-9[[:space:]]+-1([^0-9]|\$)"
+  # Guard light: kill by name or pattern is the user's call; only kill -9 -1 (every process the user owns) stays blocked.
+  if [ "$light" = 1 ]; then
+    gp_pipe=0
+    re_kill="(^|$w)kill[[:space:]]+(-s[[:space:]]+(kill|9)|-(kill|sigkill|9))[[:space:]]+-1([^0-9]|\$)"
+  fi
   if [ "$gp_pipe" = 1 ] || [[ $cmd =~ $re_kill ]]; then
     # The two exceptions read the command with its JSON quotes as plain ones. A long command keeps the old rule.
     if [ "$gp_pipe" = 0 ] && [ "${#cmd}" -lt "$BIG" ]; then

@@ -7,7 +7,8 @@
 `strict` (the default) is upstream superlite: during a build run the coordinator dispatches project code
 instead of writing it, a closed human gate holds every agent that can write, and a run suspends peer
 plugins (superpowers). `light` keeps the run machinery (protected state files, batch, question and tier
-checks, the gate on superlite's own build agents and commands) and drops the rest.
+checks, the gate on superlite's own build agents and commands) and drops the rest: the kill guard (except
+`kill -9 -1`), and the session branches and worktrees (`session ensure` works in place).
 
 The mode is SUPERLITE_GUARD, else the "guard" key in preferences.json in the superlite home.
 hooks/_preamble reads the same setting in bash: change both together. Stdlib only.

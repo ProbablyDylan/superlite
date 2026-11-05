@@ -162,6 +162,9 @@ def warn_no_session(plan_or_dir=None) -> None:  # O(N)
     try:
         if os.environ.get("SUPERLITE_NO_AUTO_SESSION") == "1":
             return
+        import guard
+        if guard.light():
+            return
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import session
         here = session.toplevel(sl_dir(plan_or_dir).resolve().parent)
