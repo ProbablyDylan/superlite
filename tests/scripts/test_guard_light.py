@@ -241,3 +241,56 @@ def test_strict_session_start_loads_everywhere(tmp_path, monkeypatch):
     other = tmp_path / "homelab"
     other.mkdir()
     assert "Start menu" in _session_start(other, tmp_path / "home")
+
+
+# ---- light: one run per topic, set aside and brought back ----
+
+def _repo(tmp_path):
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["init", "-q", "-b", "main"], ["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "i"]):
+        subprocess.run(["git", *cmd], cwd=repo, check=True)
+    return repo
+
+
+def _ensure(repo, slug):
+    cp = run(SCRIPTS / "session.py", "ensure", "--slug", slug, cwd=repo)
+    assert cp.returncode == 0, cp.both
+    return cp.out
+
+
+def test_light_topics_park_and_resume(tmp_path, light):
+    repo = _repo(tmp_path)
+    sl = repo / ".superlite"
+    _ensure(repo, "bay")
+    (sl / "pool.json").write_text('{"agents": ["bay"]}')
+    (sl / "progress.md").write_text("bay ledger\n")
+    (sl / "test-cmd.json").write_text('{"cmd": "pytest"}')
+    out = _ensure(repo, "rivers")
+    assert "parked open run bay" in out
+    assert (sl / "parked" / "bay" / "progress.md").read_text() == "bay ledger\n"
+    assert not (sl / "pool.json").exists() and (sl / "test-cmd.json").is_file()   # project files stay
+    assert hrun(repo, "Edit", {"file_path": str(repo / "src" / "a.py")}, ).returncode == 0  # bay's run no longer active
+    (sl / "progress.md").write_text("rivers ledger\n")
+    out = _ensure(repo, "bay")
+    assert "parked open run rivers" in out and "resumed parked run bay" in out
+    assert (sl / "progress.md").read_text() == "bay ledger\n" and not (sl / "parked" / "bay").exists()
+    assert (sl / "parked" / "rivers" / "progress.md").is_file()
+    assert "(guard light, in place)" in _ensure(repo, "bay")   # same topic: nothing moves
+
+
+def test_light_topics_archive_finished_and_adopt_untracked(tmp_path, light):
+    repo = _repo(tmp_path)
+    sl = repo / ".superlite"
+    sl.mkdir()
+    (sl / "orchestrator.json").write_text('{"mode": "human", "approved": true, "review_path": "docs/plans/2026-11-04-bay-area-r3.md"}')
+    (sl / "pool.json").write_text("{}")
+    out = _ensure(repo, "bay-area-r3")   # a run from before topics: same name, adopted in place
+    assert "parked" not in out and (sl / "pool.json").is_file()
+    time.sleep(0.02)
+    (sl / "run.finished").write_text("x\n")
+    out = _ensure(repo, "rivers")
+    assert "archived finished run bay-area-r3" in out
+    assert any(p.name.startswith("bay-area-r3-") for p in (sl / "archive").iterdir())
+    assert not (sl / "pool.json").exists()

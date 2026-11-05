@@ -133,11 +133,9 @@ def cmd_ensure(a) -> int:  # O(tree)
         return 0
     want = validate_slug(a.slug)
     start = start_dir(a)
-    import guard
+    import guard, topics
     if guard.light():  # no branch, no worktree, no registry row: the run works in place
-        print("session: off (guard light): no branch or worktree; work here, on the current branch")
-        session_line(start, want, "-")
-        return 0
+        return topics.ensure_in_place(start, want)
     if git("rev-parse", "--is-inside-work-tree", cwd=start, check=False).stdout.strip() != "true":
         print("session: no git repository here; continuing without a session")
         session_line(start, want, "-")
