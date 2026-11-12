@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import base  # noqa: E402
 import planfile  # noqa: E402
+import sandbox  # noqa: E402
 import state  # noqa: E402
 from review_contract import check_interfaces, rel_to, review_focus  # noqa: E402
 
@@ -307,8 +308,14 @@ def source_excerpts(root: Path, ref: str | None, files: list[str],  # O(X) + one
 
 
 def read_test_summary(path: Path) -> tuple[str, int]:  # O(file size) total
+    try:  # the pointer names the newest background run; its summary may not be written yet
+        ptr = json.loads(path.with_name("test-summary.latest").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        ptr = None
+    if isinstance(ptr, dict) and isinstance(ptr.get("summary"), str) and not Path(ptr["summary"]).exists():
+        return "- tests: running (newest run not finished; results reach the fixers)", 0
     if not path.is_file():
-        return "- no test summary recorded (`run_tests.py --full` runs alongside this review)", 0
+        return "- no test summary recorded", 0
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
@@ -317,6 +324,8 @@ def read_test_summary(path: Path) -> tuple[str, int]:  # O(file size) total
     skipped = d.get("skipped_tests") or []
     nfail = int(d["failed"]) if isinstance(d.get("failed"), int) else len(failed)
     rows = [f"- passed {d.get('passed', '?')} · failed {nfail} · skipped {d.get('skipped', len(skipped))}"]
+    if d.get("mode") == "affected" and isinstance(d.get("selected"), list):
+        rows.append(f"- affected: {len(d['selected'])} test files selected")
     rows += [f"- FAILING: {t}" for t in failed[:30]]
     rows += [f"- SKIPPED: {t}" for t in skipped[:30]]
     return "\n".join(rows), nfail
@@ -386,6 +395,20 @@ def _choose(root: Path, items: list[Item], budget: int):  # O(I*B) total
     return chosen, omitted
 
 
+def sandbox_section(root: Path, sl: Path) -> list[str]:  # O(sandbox files)
+    """`## Sandbox files` with one line per file of the open prototype; empty when none is open."""
+    try:
+        rel = sandbox.open_sandbox(sl)
+        names = sandbox.files(root, root / rel) if rel else []
+    except OSError:
+        return []
+    if not rel:
+        return []
+    shown = names[:200]
+    return ["## Sandbox files", f"Open prototype sandbox: {rel}", *[f"- {n}" for n in shown],
+            *([f"- (+ {len(names) - len(shown)} more)"] if len(names) > len(shown) else []), ""]
+
+
 def cmd_packet(a: argparse.Namespace) -> int:  # O(S*B + I*B + I log I) + git/python subprocesses total
     plan = planfile.read(a.plan)
     root = Path(a.root).resolve()
@@ -415,7 +438,7 @@ def cmd_packet(a: argparse.Namespace) -> int:  # O(S*B + I*B + I log I) + git/py
     excerpts = cap_text(source_excerpts(root, a.base, hot), max(2000, cap // 3))
 
     head = _head(plan, fast, n_open, counts, nfail)
-    tail = ["## 4. Test summary", tests_text, "",
+    tail = sandbox_section(root, sl) + ["## 4. Test summary", tests_text, "",
             "## 5. Cross-package seams (calls from one package into another)", seam_text, "",
             "## 6. Diff stat", "```\n" + diff + "\n```", "",
             "## 7. Review Focus", focus, "",

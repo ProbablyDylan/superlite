@@ -28,8 +28,9 @@ Each run starts its own session automatically (`superlite-cli session ensure`): 
 | Situation | Say something like | What happens |
 |---|---|---|
 | **MVP, a new project** | "Build me a static site generator from this spec" | One batch of questions, a plan, then parallel tasks on Sonnet and Haiku, package reviews and one fresh final review |
-| **A feature on existing code** | "Add CSV export with column widths to the existing app" | Feature mode: it researches the code (Graphify on a large codebase, never installed without your yes), writes a feature plan you validate, builds a small prototype in its own worktree for you to try, then ports it into your code with frozen interfaces and seam checks. The report shows both builds |
+| **A feature on existing code** | "Add CSV export with column widths to the existing app" | Feature mode: it researches the code (Graphify on a large codebase, never installed without your yes), writes a feature plan you validate, builds a small prototype in a sandbox inside your checkout for you to try, then ports it into your code with frozen interfaces and seam checks. The report shows both builds |
 | **Debug** | "This test fails on leap days: find the root cause and fix it" | `diagnosis` finds the cause first; fixes go to fix-only agents by tier, each leaving a note, and escalate after two failed rounds |
+| **Research** | "Research the state of the art in vector search, for a VP" | Research mode: parallel researchers fill a sourced ledger, contradictions are listed with causes, and the report is written at your level (Director, VP, Researcher or Simple) with the same claims and citations at every level |
 | **A small change** | "Rename `build` to `render` everywhere" | Small work stays inline, with a reviewer always |
 | **Review and harden** | "Review this branch and fix what you find" | Package reviewers fix their own findings; the final reviewer reports findings with tiers and never edits |
 | **You approve first** | "Build X. I will approve the plan" | A human orchestrator: you get a plain-English overview in chat; nothing runs until you say yes |
@@ -40,15 +41,17 @@ Each run starts its own session automatically (`superlite-cli session ensure`): 
 
 | Command | What it does |
 |---|---|
-| `/superlite:start [mode] [what]` | A menu: superlite suggests the mode for your request (regular, MVP, feature, debug, small, review), you confirm it and pick who orchestrates |
+| `/superlite:start [mode] [what]` | A menu: superlite suggests the mode for your request (regular, MVP, feature, debug, small, review, research), you confirm it and pick who orchestrates |
 | `/superlite:mvp <what>` | Plan the smallest working version on a clickable HTML prototype, then build it |
 | `/superlite:feature <change>` | Change existing code: a plan you validate, a prototype you try, then the integration with seam checks |
 | `/superlite:debug <bug>` | Root cause first, then a fix with a regression test |
+| `/superlite:research <topic>` | Research a topic with parallel agents: a sourced ledger, then a report at your level |
 | `/superlite:small <change>` | A small change inline, without the planning flow |
 | `/superlite:human`, `/superlite:ai`, `/superlite:approve` | Choose who orchestrates; approve the review plan |
 | `/superlite:status`, `/superlite:stop`, `/superlite:resume` | Watch, stop or resume a build |
 | `/superlite:agents`, `/superlite:tail` | Watch a run: the agent map pane, or the same run as a terminal feed without the mod |
 | `/superlite:review`, `/superlite:report`, `/superlite:finish` | Review a branch, read build reports, finish the branch |
+| `/superlite:merged [slug\|branch\|PR]` | After the PR merges: confirm it with `gh`, update local main, close the session, delete the local branch |
 | `/superlite:setup`, `/superlite:intro`, `/superlite:help [section]` | First-run check, the intro screen, the detailed help |
 
 Plain words work just as well; the commands are shortcuts.
@@ -58,11 +61,15 @@ Plain words work just as well; the commands are shortcuts.
 - **Human orchestrator.** You get a plain-English overview as a chat reply (goal, approach, what it touches, questions with defaults; the detailed plan stays in `docs/plans/` for the agents), and nothing is linted, dispatched or sent to an agent until you say yes in any words. Any clear approval counts (yes, go ahead, looks good, or similar), including a longer note. After that you are not asked again: any change to scope is recorded as a ruling and listed at the end under "Changed from the approved plan". Small inline work needs only your yes in chat.
 - **AI orchestrator.** It plans, lints, dispatches and rules on open choices itself, with no overview and no questions, and ends with a plain-English summary of what changed and the calls it made.
 
+<p align="center">
+  <img src="assets/review-plan.webp" width="720" alt="A review plan open in a split pane beside the session: the chat on the left, and on the right the plan's diagrams for a feature prototype: what is kept and what is thrown away, how a sandbox is linked to its session and run, and how it gets built in waves.">
+</p>
+
 Both stop for destructive, outward (push, merge, publish) or security-sensitive actions, and superlite never commits during a run: finished tasks are hidden checkpoints. A checkpoint is a hidden save of one task under `refs/superlite/*`. At session end, shipping asks once: "Commit to <session branch>" or "Leave uncommitted".
 
 ### Watch a run
 
-**Let it run.** Watch `.superlite/` in your project: `progress.md` has the rulings and the log, `test-summary.json` the latest test result, `metrics.jsonl` and the run history the time and cost per agent.
+**Let it run.** Watch `.superlite/` in your project: `progress.md` has the rulings and the log, `test-summary.json` the latest test result, `metrics.jsonl` and the run history the time and cost per agent. A finished run is archived in `.superlite/runs/<id>/`.
 
 ```mermaid
 flowchart LR
@@ -85,12 +92,14 @@ A read-only view, offered when you approve the plan (reply `approve map`), or op
 
 ## Install
 
-You need Claude Code, git, Python 3.10 or newer (the tools are Python; the project you build can be in any language), and `bash` (Git Bash on Windows). `uv` is optional.
+You need Claude Code, git, Python 3.12 or newer (the tools are Python; the project you build can be in any language), and `bash` (Git Bash on Windows). `uv` is optional.
 
 ```
 /plugin marketplace add iha2/superlite
 /plugin install superlite@superlite-dev
 ```
+
+Optional, for the agent map pane in Claude Desktop: `/plugin install claude-agent-map@superlite-dev`. Superlite works without it; in a terminal use `/superlite:tail`.
 
 Or load a local checkout for one session: `claude --plugin-dir <path-to-superlite>`
 
@@ -450,6 +459,16 @@ Analysis scripts:
 ## Note
 
 While a superlite run is in progress, superpowers is suspended (`superlite-cli orchestrator set` writes `.superlite/peers.json` and, on Claude Code, turns `superpowers@claude-plugins-official` off in `.claude/settings.local.json`). The lifecycle skills are named `inventing`, `drafting`, `swarm`, `testing`, `diagnosis`, `proof`, and `shipping`, so a short-name lookup does not open the superpowers file. Both plugins still inject a session bootstrap. `superlite-cli finish` removes the marker and restores the previous setting, so superpowers or anything like it can be used again. With the guard set to `light` (see [Config](docs/config.md#guard-mode)), nothing is suspended.
+
+## Star history
+
+<a href="https://www.star-history.com/#iha2/superlite&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=iha2/superlite&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=iha2/superlite&type=Date" />
+    <img alt="Star history chart for iha2/superlite" src="https://api.star-history.com/svg?repos=iha2/superlite&type=Date" />
+  </picture>
+</a>
 
 ## License
 

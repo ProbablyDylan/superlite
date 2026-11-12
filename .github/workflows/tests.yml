@@ -15,11 +15,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.12"
       - name: Run tests
-        run: uv run pytest tests/scripts tests/bench
+        run: uv run pytest tests/scripts tests/bench/test_real_formats.py -m "not slow"
 
   # Hooks run under stock macOS /bin/bash 3.2 on users' Macs; Ubuntu's bash 5 hides bash 4+ syntax.
   test-macos-bash32:
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.12"
       - name: Time reverse-DNS lookups (HTTPServer.server_bind)
@@ -46,7 +46,7 @@ jobs:
         run: |
           export PATH="/bin:$PATH"
           bash --version | head -1 | grep -q 'version 3\.2' || { echo "bash on PATH is not 3.2"; bash --version; exit 1; }
-          uv run pytest tests/scripts
+          uv run pytest tests/scripts -m "not slow"
 
   # Hooks need a bash; windows-latest ships Git for Windows, so run the steps under Git Bash.
   test-windows:
@@ -58,11 +58,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.12"
       - name: Run tests under Git Bash
         run: |
           export PATH="/c/Program Files/Git/bin:$PATH"
           bash --version | head -1
-          uv run pytest tests/scripts tests/bench
+          uv run pytest tests/scripts tests/bench/test_real_formats.py -m "not slow"

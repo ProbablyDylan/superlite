@@ -20,7 +20,7 @@ Save to `docs/plans/YYYY-MM-DD-<topic>.md`. When called from `superlite:inventin
 **Who orchestrates sets the mode** (`superlite-cli orchestrator status`).
 - **Human orchestrator** (the human approves an overview before anything runs), in this order (`review-plan.md`):
   1. Write the machine plan `docs/plans/<date>-<topic>.md` in the order below and check it with plain `superlite-cli plan_tools lint --plan <path>`. It is for the agents; do not open it for the user.
-  2. Reply with the overview in chat: plain English, goal, approach, what it touches, questions with defaults; no commands, line numbers or task ids. Not AskUserQuestion. End with "Say go ahead in any words to start, or tell me what to change" and END THE TURN.
+  2. Reply with the overview in chat: plain English, goal, approach, what it touches, questions with defaults (always include "Run the whole test suite at finish?", default no; the approving reply may set it); no commands, line numbers or task ids. Not AskUserQuestion. End with "Say go ahead in any words to start, or tell me what to change" and END THE TURN.
   3. Read their answer. If you understand it as approval, send `superlite-cli orchestrator approve --review <plan path>` before editing the plan, then make any small changes they asked for. Do not pass their words through and do not ask them to retype approve. If they change the goal or approach, revise and send a new overview. `lint --stable`, `dispatch`, `wave0` and `build_prime` refuse until then.
   4. `lint --stable`, and dispatch the stable set in the same turn.
   5. It patches the FIX tasks, re-lints and dispatches the newly stable ones without asking again, as long as each fix stays inside what was approved (sizes, splits, stubs, field corrections). A fix that changes scope or the approach the human saw is decided without asking the human: record it as `Ruling: [scope] <decision> - <why> - <cost if wrong>`; `superlite-cli finish` lists these under "Changed from the approved plan". AI orchestrator: no overview, straight to the machine plan.
@@ -38,7 +38,7 @@ In both modes, write for the split:
 
 ## Plan shape, in this order
 
-1. **Header:** Goal, Architecture, Tech stack, Spec path, `**Detail:** contracts | tests | full` (default `tests`), `**Target-min:** N` (predicted-total target, default 11), `**Ignore:** a/, b, *.c` (optional: paths or globs your tooling generates beyond the language defaults, e.g. `.next/`, `.env`, `*.sqlite`), global constraints (exact values copied from the spec: version floors, names, formats). Task briefs point here, so do not repeat constraints per task.
+1. **Header:** Goal, Architecture, Tech stack, Spec path, `**Detail:** contracts | tests | full` (default `tests`), `**Full suite:** yes | no` (missing means no; from the "Run the whole test suite at finish?" answer), `**Target-min:** N` (predicted-total target, default 11), `**Ignore:** a/, b, *.c` (optional: paths or globs your tooling generates beyond the language defaults, e.g. `.next/`, `.env`, `*.sqlite`), global constraints (exact values copied from the spec: version floors, names, formats). Task briefs point here, so do not repeat constraints per task.
 2. **Main diagram** (always): Mermaid of components and data flow.
 3. **File structure:** every file and its one responsibility. Split by responsibility, not by layer, and follow the repo's patterns.
 4. **Task graph** (always, machine-readable): see below.

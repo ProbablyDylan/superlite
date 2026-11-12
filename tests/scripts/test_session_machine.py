@@ -112,13 +112,14 @@ class SessionMachine(RuleBasedStateMachine):
         return rc, out
 
     def holdings(self, wts: dict) -> dict:
-        """One scan: scope -> all text held there (checkout files, stash patches). Scopes: ("co", path), ("stash", slug)."""
+        """One scan: scope -> all text held there (checkout files, stash patches, WIP refs). Scopes: ("co", path), ("stash", slug), ("wip", slug)."""
         held: dict = {}
         for co in map(Path, wts):
             chunks = []
             for dirpath, dirs, files in os.walk(co):
                 rel = Path(dirpath).relative_to(co).as_posix()
-                dirs[:] = [d for d in dirs if d != ".git" and not (rel == ".superlite" and d == "worktrees")]
+                # nested session worktrees (old and new homes) are their own checkouts, scanned on their own
+                dirs[:] = [d for d in dirs if d != ".git" and not (rel in (".superlite", ".claude") and d == "worktrees")]
                 for name in files:
                     try:
                         chunks.append((Path(dirpath) / name).read_text(encoding="utf-8", errors="ignore"))
@@ -132,13 +133,19 @@ class SessionMachine(RuleBasedStateMachine):
                 self.stash_text[ref] = git(self.root, "show", ref) + git(self.root, "show", f"{ref}^3", check=False)
             text = self.stash_text[ref]
             held[("stash", m.group(1) if m else msg)] = held.get(("stash", m.group(1) if m else msg), "") + text
+        prefix = "refs/superlite/wip/"  # close parks dirty work on a private ref instead of the stash list
+        for line in git(self.root, "for-each-ref", "--format=%(objectname) %(refname)", prefix).splitlines():
+            oid, _, ref = line.partition(" ")
+            if oid not in self.stash_text:
+                self.stash_text[oid] = git(self.root, "show", oid)
+            held[("wip", ref[len(prefix):])] = self.stash_text[oid]
         return held
 
     def where_found(self, token: str, held: dict | None = None) -> set:
         return {scope for scope, text in (held or self.holdings()).items() if token in text}
 
     def scopes_of(self, slug: str, wts: dict) -> set:
-        return {("stash", slug)} | {("co", p) for p, b in wts.items() if slug_of(b) == slug}
+        return {("stash", slug), ("wip", slug)} | {("co", p) for p, b in wts.items() if slug_of(b) == slug}
 
     def known(self) -> list:
         """Registered slugs first (so most picks hit a real session), then the pool (so some miss)."""
@@ -248,6 +255,34 @@ class SessionMachine(RuleBasedStateMachine):
             f = Path(path) / ".superlite" / "orchestrator.json"
             owner = json.loads(f.read_text(encoding="utf-8")).get("owner") if f.is_file() else None
             assert owner is None or owner == slug_of(branch), f"run file of {owner} in {path} on {branch}; {ctx}"
+
+
+class _Pick:
+    """Stands in for st.data(): draw returns a fixed choice."""
+    def __init__(self, value):
+        self.value = value
+
+    def draw(self, _strategy):
+        return self.value
+
+
+def test_discarding_a_parallel_session_drops_only_its_tokens():
+    """Pinned F-T9-1: a token in a parallel worktree under <root>/.claude/worktrees/ was also counted as held
+    by the main checkout, so discarding that session kept tracking the dropped token and reported it lost."""
+    m = SessionMachine()
+    try:
+        m.first_session()
+        m.ensure("b", "stash")
+        wt_b = next(Path(p) for p, b in m.worktrees().items() if b == "superlite/sessions/b")
+        m.edit_tracked(_Pick(wt_b))
+        m.add_untracked(_Pick(m.root))
+        m.hold()
+        m.discard(_Pick("b"))
+        assert m.log[-1] == (("discard", "b"), (), 0)
+        assert m.tokens == {"TOKEN2END"}, m.tokens
+        m.hold()
+    finally:
+        m.teardown()
 
 
 @pytest.mark.slow

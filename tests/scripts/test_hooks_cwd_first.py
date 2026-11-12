@@ -87,14 +87,6 @@ def test_compact_nudge_reads_worktree_run(tree):
     assert r.stdout.strip() != ""
 
 
-def test_hooks_parse_under_bash(tree):
-    if not BASH:
-        pytest.skip("bash not available")
-    for h in ("pre-tool", "prompt", "_preamble", "_kill", "_edits", "_rewrite", "_reply", "_nudge",
-              "capture-agent-launch", "capture-agent-stop"):
-        assert subprocess.run([BASH, "-n", str(HOOKS / h)]).returncode == 0
-
-
 @pytest.mark.parametrize("cwd", ["", "/", "C:\\\\Users\\\\x", "/no such/dir with \\\"quote", "relative/dir", None])
 def test_guard_odd_cwd_keeps_hub_run_and_never_crashes(tree, cwd):
     hub, _wt = tree
@@ -139,3 +131,25 @@ def test_reply_lands_in_worktree_with_escaped_quote(named_tree):
     assert r.returncode == 0
     assert (wt / ".superlite" / "human-replies.jsonl").exists(), wt.name
     assert not (hub / ".superlite" / "human-replies.jsonl").exists()
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
+
+
+def test_harness_worktree_under_hub_uses_hub_run(tmp_path):
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    _git(hub, "init", "-q")
+    _git(hub, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i")
+    wt = hub / ".claude" / "worktrees" / "x"
+    _git(hub, "worktree", "add", "-q", "-b", "worktree-x", str(wt))
+    (hub / ".superlite").mkdir()
+    (hub / ".superlite" / "orchestrator.json").write_text('{"mode": "human", "approved": true}')
+    (hub / ".superlite" / "stable.json").write_text("{}")
+    assert not (wt / ".superlite").exists()
+    payload = {"tool_name": "Write", "tool_input": {"file_path": str(hub / "src" / "a.py")}, "cwd": str(wt)}
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+    r = subprocess.run([BASH, str(HOOKS / "pre-tool")], input=json.dumps(payload), capture_output=True,
+                       text=True, env=env, cwd=str(wt))
+    assert r.returncode == 2

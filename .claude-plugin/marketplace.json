@@ -2,16 +2,16 @@
   "name": "superlite-dev",
   "description": "Development marketplace for superlite",
   "owner": {
-    "name": "CWogu"
+    "name": "Iheatu Chris Wogu"
   },
   "plugins": [
     {
       "name": "superlite",
       "description": "Lightweight Claude Code skills for the build lifecycle: one approval gate, parallel waves, short reports",
-      "version": "3.2.0",
+      "version": "4.0.0",
       "source": "./",
       "author": {
-        "name": "CWogu"
+        "name": "Iheatu Chris Wogu"
       }
     },
     {
@@ -20,7 +20,7 @@
       "version": "0.2.0",
       "source": {"source": "github", "repo": "iha2/claude-agent-map"},
       "author": {
-        "name": "CWogu"
+        "name": "Iheatu Chris Wogu"
       }
     }
   ]

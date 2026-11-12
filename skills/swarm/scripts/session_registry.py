@@ -4,12 +4,13 @@ The registry is `<hub>/.superlite/sessions.json`; the hub is the main checkout, 
 host of the active session. Every write goes through `update` (lock, read, change, atomic write);
 `registry_lock` serializes a whole command (its git steps and its registry change) across processes.
 """
+import errno
 import re
 import shutil
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -19,7 +20,9 @@ if str(HERE) not in sys.path:
 import base  # noqa: E402
 import ident  # noqa: E402
 import state  # noqa: E402
+import worktree_home  # noqa: E402
 from journal import Journal  # noqa: E402
+from worktree_home import hide_all, hide_superlite  # noqa: E402,F401  (re-exported)
 
 GitError = base.GitError
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -31,7 +34,7 @@ STORE = "session-store"
 EXIT_REDIRECT = 3
 STASH_PREFIX = "superlite-session:"
 # Hub-level entries and real git checkouts: never parked, moved or wiped with run state.
-STATIONARY = {"worktrees", "sandboxes", STORE, FILE, FILE + ".lock", LOCK}
+STATIONARY = {"worktrees", "sandboxes", "runs", STORE, FILE, FILE + ".lock", LOCK}
 
 
 def git(*args, cwd, check=True):
@@ -129,7 +132,7 @@ def worktree_map(root: Path) -> dict[str, str]:  # O(W)
     path, branch = None, None
     for ln in text.splitlines() + [""]:
         if ln.startswith("worktree "):
-            path = ln[len("worktree "):]
+            path = ident.git_path(ln[len("worktree "):])
         elif ln.startswith("branch "):
             ref = ln[len("branch "):]
             branch = ref[11:] if ref.startswith("refs/heads/") else ref
@@ -163,18 +166,6 @@ def in_progress(cwd: Path) -> bool:
     return any((gitdir / n).exists() for n in ("MERGE_HEAD", "rebase-merge", "rebase-apply"))
 
 
-def hide_superlite(root: Path) -> None:
-    """Keep .superlite/ out of `git status` via .git/info/exclude, never by editing a tracked .gitignore."""
-    common = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root).stdout.strip()
-    f = Path(common) / "info" / "exclude"
-    f.parent.mkdir(parents=True, exist_ok=True)
-    text = f.read_text(encoding="utf-8") if f.is_file() else ""
-    if any(ln.strip() in (f"{state.DIR_NAME}/", f"/{state.DIR_NAME}/") for ln in text.splitlines()):
-        return
-    with f.open("a", encoding="utf-8", newline="\n") as fh:
-        fh.write(("" if not text or text.endswith("\n") else "\n") + f"{state.DIR_NAME}/\n")
-
-
 # ---- the registry file
 
 def _normalize(d) -> dict:
@@ -183,12 +174,14 @@ def _normalize(d) -> dict:
     out = []
     for s in sessions:
         if isinstance(s, dict) and s.get("slug"):
-            out.append({**s, "branch": s.get("branch") or branch_for(s["slug"]),
+            out.append({**s, "branch": s.get("branch") or (None if s.get("detached") else branch_for(s["slug"])),
                         "status": s.get("status") or "parked"})
     reg = {"v": 2, "base": d.get("base"), "active": d.get("active"), "sessions": out,
            "host_worktree": d.get("host_worktree")}
     if d.get("untracked") in ("ask", "stash", "keep"):
         reg["untracked"] = d["untracked"]
+    if isinstance(d.get("worktrees"), list):
+        reg["worktrees"] = [w for w in d["worktrees"] if isinstance(w, dict)]
     return reg
 
 
@@ -214,13 +207,26 @@ def write(root: Path, reg: dict) -> None:
     update(root, lambda _old: reg)
 
 
+def _acquire(fh, wait: float = 120.0) -> None:
+    """base._lock, retried: on Windows msvcrt.locking gives up after about 10 s with EDEADLK (errno 36) even
+    though no deadlock exists, which a queue of slow commands (parallel creates under load) can hit."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            base._lock(fh)
+            return
+        except OSError as e:
+            if e.errno != errno.EDEADLK or time.monotonic() >= end:
+                raise
+
+
 @contextmanager
 def registry_lock(root: Path):
     """Serialize a whole command (its git transitions and its registry change) across processes."""
     lock_path = state.path(root, LOCK)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+") as fh:
-        base._lock(fh)
+        _acquire(fh)
         try:
             yield
         finally:
@@ -259,14 +265,14 @@ def row_at(reg: dict, here: Path, host: Path) -> dict | None:  # O(N)
     return next((s for s in reg["sessions"] if same(s.get("worktree"), here)), None)
 
 
-def mark_run(cwd: Path, run: str) -> str | None:  # O(N)
+def mark_run(cwd: Path, run: str, lock_held: bool = False) -> str | None:  # O(N)
     """Set run open|finished on the session row for the checkout containing cwd; slug, or None. Never raises."""
     try:
         here = toplevel(Path(cwd))
         root = hub_root(here)
         if not _path(root).is_file():
             return None
-        with registry_lock(root):
+        with (nullcontext() if lock_held else registry_lock(root)):
             reg = read(root)
             row = row_at(reg, here, resolve_host(root, reg))
             if row is None:
@@ -283,7 +289,8 @@ def mark_run(cwd: Path, run: str) -> str | None:  # O(N)
 
 def free_slug(root: Path, reg: dict, slug: str) -> str:  # O(N * k)
     cand, n, stem = slug, 1, slug
-    while find_row(reg, cand) or branch_exists(root, branch_for(cand)) or (sessions_dir(root) / cand).exists():
+    while find_row(reg, cand) or branch_exists(root, branch_for(cand)) or (sessions_dir(root) / cand).exists() \
+            or (worktree_home.home_path(root) / f"sessions-{cand}").exists():
         n += 1
         stem = slug[:41 - len(str(n)) - 1].rstrip("-") or slug[:1]  # keep stem-N within the slug limit
         cand = f"{stem}-{n}"
@@ -327,7 +334,8 @@ def base_sha_of(root: Path, reg: dict, row: dict) -> str:
     on the row (the caller holds the registry lock and writes it)."""
     if row.get("base_sha"):
         return row["base_sha"]
-    cp = git("merge-base", row.get("branch") or branch_for(row["slug"]), row_base(root, reg, row),
+    tip = row.get("head") if row.get("detached") else row.get("branch") or branch_for(row["slug"])
+    cp = git("merge-base", tip or "HEAD", row_base(root, reg, row),
              cwd=root, check=False)
     sha = cp.stdout.strip() if cp.returncode == 0 else ""
     if sha:
@@ -462,7 +470,9 @@ def owned_worktree(root: Path, row: dict) -> bool:
     wt = row.get("worktree")
     if not wt or row.get("owned") is False or same(wt, root):
         return False
-    return bool(row.get("owned")) or ident.within(Path(wt), sessions_dir(root))
+    if worktree_home.harness_name(wt, row.get("branch")):
+        return False  # a harness checkout in the shared home is never ours to remove
+    return bool(row.get("owned")) or ident.within(Path(wt), sessions_dir(root)) or worktree_home.superlite_cut(root, wt)
 
 
 # ---- untracked files: ask once, before any change

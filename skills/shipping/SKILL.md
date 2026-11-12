@@ -9,7 +9,7 @@ Never push, merge or publish without the human. The human's choice is the only a
 
 ## 1. Verify
 
-Run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --full` (it prints one line: `passed failed skipped seconds`). Skip it if the last full run was green and nothing has changed since (see `superlite:proof`). If tests fail, report the failures and stop. Do not offer to merge failing work.
+Read `**Full suite:**` in the plan header. `yes`: run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --full --reuse`. `no` or missing: run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --affected --base <start sha>` (the sha is the `- start <sha>` line in `.superlite/progress.md`). After `finish`, the run's files live in the folder its `run: archived to <dir>` line names: read the start sha from `<dir>/progress.md`, and pass `--summary <dir>/test-summary.json` with `--full --reuse` so it can see the last green run. It prints one line: `passed failed skipped seconds`. `--reuse` skips a rerun when nothing has changed since a green run (see `superlite:proof`). Red blocks merge and PR: report the failures and stop. Do not offer to merge failing work.
 
 ## 2. Detect the base branch yourself
 
@@ -43,8 +43,8 @@ No further menus or typed confirmations. Act on the answer.
 
 ## 5. Execute the choice
 
-- **Merge locally:** from the main checkout, inspect `bash <skill-dir>/../swarm/scripts/superlite-cli session status`, `git status --short`, and `git worktree list --porcelain` before choosing the merge location. Do not switch or merge in a checkout hosting another session, even if its run is finished, or one with uncommitted work. If the base branch is already checked out in such a checkout, stop and ask the user to finish or park that work before continuing; never force a second checkout. Otherwise use the base branch's existing clean, unoccupied checkout, or create a temporary checkout when the main checkout cannot be used (`git worktree add .superlite/worktrees/merge-<base> <base>`). If the main checkout is safe to use and the base is not checked out elsewhere, check out the base there. Merge the feature branch in the chosen checkout. If the merge was not a fast-forward or had conflicts, run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --full` there again. Remove any temporary merge checkout created by this step. Close the session (step 6), then remove the worktree (step 7), then delete the feature branch with `git branch -d`. Finish by running `bash <skill-dir>/../swarm/scripts/superlite-cli session status`: each session now behind main shows `main:+N`, and is offered the update in its own chat. Nothing is synced automatically.
-- **Push and PR:** `git push -u origin <branch>`, then `gh pr create` with a title and a body holding the summary and test evidence. Report the PR URL. Keep the branch. Close the session (step 6), then remove the worktree (step 7).
+- **Merge locally:** from the main checkout, inspect `bash <skill-dir>/../swarm/scripts/superlite-cli session status`, `git status --short`, and `git worktree list --porcelain` before choosing the merge location. Do not switch or merge in a checkout hosting another session, even if its run is finished, or one with uncommitted work. If the base branch is already checked out in such a checkout, stop and ask the user to finish or park that work before continuing; never force a second checkout. Otherwise use the base branch's existing clean, unoccupied checkout, or create a temporary checkout when the main checkout cannot be used (`.claude/worktrees/merge-<base>`; enter it with `EnterWorktree path=` under Claude Code, else `cd`; the plain `git worktree add` form is under "Other harnesses (fallback)" below). If the main checkout is safe to use and the base is not checked out elsewhere, check out the base there. Record the base branch's HEAD SHA before merging, then merge the feature branch in the chosen checkout. If the merge was not a fast-forward or had conflicts, read `**Full suite:**` in the plan header: for `yes`, run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --full --reuse`; otherwise run `bash <skill-dir>/../swarm/scripts/superlite-cli run_tests --affected --base <pre-merge base sha>` there again. Remove any temporary merge checkout created by this step. Close the session (step 6), then remove the worktree (step 7), then delete the feature branch with `git branch -d`. Finish by running `bash <skill-dir>/../swarm/scripts/superlite-cli session status`: each session now behind main shows `main:+N`, and is offered the update in its own chat. Nothing is synced automatically.
+- **Push and PR:** `git push -u origin <branch>`, then `gh pr create` with a title and a body holding the summary and test evidence. Report the PR URL and that `/superlite:merged` cleans up once it merges (`superlite:merged`). Keep the branch. Close the session (step 6), then remove the worktree (step 7).
 - **Keep:** report the branch name. If the worktree is clean, close the session (step 6), then remove it (step 7). If it has uncommitted work, leave it and report the path.
 
 ## 6. Close the session
@@ -55,14 +55,18 @@ If it prints an `ASK` line (exit 4, nothing changed), ask exactly what its `ask:
 
 ## 7. Worktree cleanup
 
-A flow removes every worktree it created before it ends. Move the agent root back to the main checkout first, then from there run `git worktree remove <path>`. Skip a worktree that `superlite-cli session close` already removed (`session: closed <slug>; removed its worktree`), and never remove one this flow did not cut.
+A flow removes every worktree superlite cut before it ends: `superlite-cli session close` removes them (`session: closed <slug>; removed its worktree`). Leave the worktree first (`ExitWorktree` with `action: "keep"` under Claude Code, else `cd` to the main checkout); `ExitWorktree` never removes a superlite-cut worktree. Claude-created worktrees (`session: create` then `EnterWorktree name=`, the desktop app, `claude --worktree`) end with `ExitWorktree` `remove` (or `keep`) or the app's cleanup; `session close` only archives and unregister them, and superlite never removes them or their branch. Never remove one this flow did not cut.
+
+### Other harnesses (fallback)
+
+Without `EnterWorktree`: `cd` back to the main checkout, then `git worktree remove <path>`; a temporary merge checkout is `git worktree add .claude/worktrees/merge-<base> <base>`.
 
 - Merged: remove the worktree, then `git branch -d` the feature branch.
 - Pushed: remove the worktree. Leave the branch.
 - Kept, and `git status --short` in that worktree is empty: remove the worktree. Leave the branch.
 - Kept, with uncommitted work: leave the worktree and name its path. Do not use `--force`.
 
-A prototype sandbox is removed with `superlite-cli proto discard` at feature finish, not with this step.
+A prototype sandbox folder is deleted with `superlite-cli proto discard` at feature finish (or by `session close`), not with this step.
 
 ## Never
 

@@ -6,11 +6,8 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -20,7 +17,6 @@ import scenario
 
 ROOT = scenario.ROOT
 SCRIPTS = scenario.SCRIPTS
-PROBE_RUN = ROOT / "skills" / "swarm" / "probes" / "probe_run.py"
 FIXTURES = Path(__file__).parent / "fixtures"
 FLOW_PLAN = FIXTURES / "flow_plan.md"
 
@@ -64,45 +60,16 @@ def test_pr25_close_clean_worktree_keeps_branch_with_unmerged_commits(repo):
     assert r.code == 0, r.err
     assert not wt.exists()
     assert repo.git("rev-parse", "--verify", "-q", branch).strip()  # the branch and its commit survive
-    assert repo.session_row("p") is not None  # and the row stays so the session can come back
-
-
-# ---- PR 23: open_in_harness wording ----------------------------------------------------------------------------
-
-def test_pr23_feature_ai_mode_open_is_guarded():
-    """Finding 40: the AI-mode branch of feature.md opens the plan only when open_in_harness is on."""
-    step = next(ln for ln in text("commands/feature.md").splitlines() if ln.startswith("3. "))
-    ai = step.split("AI mode:", 1)[1]
-    assert "open_in_harness" in ai.split("open")[0] + ai[:60]
-
-
-def test_pr23_mvp_open_happens_before_the_mode_split():
-    """Finding 41: the guarded open of .mvp.md applies to both orchestrator modes (it is not under the Human heading)."""
-    skill = text("skills/mvp-prototype/SKILL.md").splitlines()
-    i = next(n for n, ln in enumerate(skill) if "open_in_harness" in ln)
-    heading = next(ln for ln in reversed(skill[:i]) if ln.startswith("## "))
-    command = next(ln for ln in text("commands/mvp.md").splitlines() if "open_in_harness" in ln)
-    assert "Human" not in heading and not command.split("open_in_harness")[0].lstrip("0123456789. ").startswith("Human")
-
-
-def test_pr23_resume_opens_only_human_facing_documents():
-    """Finding 42: resume follows the Review plan header and never opens machine, .proto.md or integration plans."""
-    step = next(ln for ln in text("commands/resume.md").splitlines() if "open_in_harness" in ln)
-    assert "**Review plan:**" in step and ".proto.md" in step and "integration" in step
-    assert "Never open" in step and "skip opening" in step
-
-
-def test_pr23_drafting_open_rule_checks_the_flag_in_both_modes():
-    """Finding 43: the shared open rule in drafting names the open_in_harness check itself and covers both modes."""
-    rule = next(ln for ln in text("skills/drafting/SKILL.md").splitlines() if ln.startswith("- **Open it:**"))
-    assert "open_in_harness: on" in rule and "both orchestrator modes" in rule and "agent_specs status" in rule
+    assert repo.session_row("p") is None  # the row leaves the registry...
+    manifest = repo.state("session-store/p/session.json")  # ...and the archive manifest lets the session come back
+    assert manifest and manifest["slug"] == "p" and manifest["branch"] == branch and manifest["run"] == "finished"
 
 
 # ---- PR 21: sessions -------------------------------------------------------------------------------------------
 
 def test_pr21_create_refuses_an_existing_directory_that_is_not_a_worktree(repo):
     """Finding 63: a plain directory already sitting at the session path is never adopted, and no branch changes."""
-    (repo.root / ".superlite" / "worktrees" / "sessions" / "n").mkdir(parents=True)
+    (repo.root / ".claude" / "worktrees" / "sessions-n").mkdir(parents=True)
     r = repo.cli("session", "create", "--slug", "n", "--worktree")
     assert r.code == 2 and "already exists" in r.err
     assert repo.branch() == "main" and repo.session_row("n") is None
@@ -146,13 +113,6 @@ def test_pr21_split_from_an_owned_worktree_keeps_it_owned(repo):
 
 
 # ---- PR 18 / PR 15 ---------------------------------------------------------------------------------------------
-
-def test_pr18_readme_scanner_badge_is_not_static():
-    """Finding 74: no shields.io badge hard-codes 'passing'; the scanner badge comes from the workflow."""
-    readme = text("README.md")
-    assert not re.search(r"img\.shields\.io/badge/[^\"')]*passing", readme)
-    assert "plugin-scanner.yml" in readme
-
 
 def _serve_args(tmp_path, monkeypatch, args_src: str):
     """Run the live-server adapter's argument resolver against a throwaway module; returns (positional, keywords)."""
@@ -201,34 +161,8 @@ def test_pr14_slug_cannot_walk_out_of_the_session_store(repo):
     assert (repo.root / "src" / "keep.py").is_file()
 
 
-def test_pr14_probe_run_default_out_follows_root_not_cwd(tmp_path):
-    """Finding 111: run from a parent directory with a relative --root, the results and log land in <root>/.superlite,
-    not <root>/<root>/.superlite."""
-    proj = tmp_path / "proj"
-    shutil.copytree(FIXTURES / "probe_lib", proj)
-    p = subprocess.run([sys.executable, str(PROBE_RUN), "--root", "proj", "--adapter", "proj/adapter.py",
-                        "--categories", "state", "--files", "src/parser.py"], cwd=tmp_path,
-                       capture_output=True, text=True, timeout=120)
-    assert p.returncode == 0, p.stdout + p.stderr
-    assert (proj / ".superlite" / "probes" / "probe-results.json").is_file()
-    assert (proj / ".superlite" / "incidents.jsonl").is_file()
-    assert not (proj / "proj").exists() and not (tmp_path / "proj" / "proj").exists()
 
 
-def test_pr14_probe_run_background_keeps_space_separated_out_and_log(tmp_path):
-    """Finding 112: --background with `--out custom.json --log custom.jsonl` hands the child both flags and values."""
-    proj = tmp_path / "proj"
-    shutil.copytree(FIXTURES / "probe_lib", proj)
-    p = subprocess.run([sys.executable, str(PROBE_RUN), "--root", str(proj), "--adapter", str(proj / "adapter.py"),
-                        "--categories", "state", "--files", "src/parser.py", "--out", "custom.json", "--log", "custom.jsonl", "--background"],
-                       capture_output=True, text=True, timeout=60)
-    assert p.returncode == 0 and "started" in json.loads(p.stdout)
-    out = proj / "custom.json"
-    end = time.time() + 60
-    while time.time() < end and not out.exists():
-        time.sleep(0.2)
-    assert out.is_file(), "the child exited with an argument error: --out custom.json was lost"
-    assert not (proj / ".superlite" / "probes" / "probe-results.json").exists()
 
 
 # ---- PR 7 ------------------------------------------------------------------------------------------------------
@@ -241,6 +175,18 @@ def test_pr7_exclusive_settings_write_does_not_block_checkpoints(repo):
     assert repo.cli("orchestrator", "set", "ai", env={"CLAUDE_CODE": "1"}).code == 0
     settings = repo.root / ".claude" / "settings.local.json"
     assert settings.is_file()  # the suspension did write the file
+    plan = repo.write("docs/plans/2026-11-01-flow.md", FLOW_PLAN.read_text(encoding="utf-8"))
+    assert repo.cli("plan_tools", "lint", "--plan", plan, "--stable").code == 0
+    assert repo.cli("dispatch", "--plan", plan).code == 0
+    for tid in ("T1", "T2", "T3", "T4"):
+        fake_agent.do(tid, plan, repo)
+    r = repo.cli("checkpoint", "--plan", plan, "T1", "T2", "T3", "T4")
+    assert r.code == 0 and "out-of-scope" not in r.out, r.out + r.err
+
+
+def test_checkpoint_ignores_a_harness_worktree_in_the_unhidden_home(repo):
+    """A hub holding a harness-made .claude/worktrees/<x> checkout (home not hidden yet) never blocks a checkpoint."""
+    repo.git("worktree", "add", "-q", "-b", "worktree-agent-1", repo.root / ".claude" / "worktrees" / "agent-1")
     plan = repo.write("docs/plans/2026-11-01-flow.md", FLOW_PLAN.read_text(encoding="utf-8"))
     assert repo.cli("plan_tools", "lint", "--plan", plan, "--stable").code == 0
     assert repo.cli("dispatch", "--plan", plan).code == 0

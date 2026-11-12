@@ -16,7 +16,10 @@ ROW SCHEMA (v1), one JSON object per line:
   of the task's package), band (see band_of), critical_path (bool; predicted for source=run, actual for
   imports), slack_min (predicted slack in minutes, or actual slack_s / 60 for imports),
   tier (haiku|sonnet), agent_type, model, prime_bytes, duration_s, tokens {in,out,cache_read,cache_write},
-  cost_usd, tool_calls, first_time_pass (true|false|null), rework_s, rework_cost, pred_min.
+  cost_usd, tool_calls, first_time_pass (true|false|null), rework_s, rework_cost, pred_min,
+  phase ("proto" | "build"; absent on older rows; `run` is the run archive's id), run_id (feature run id or null), sandbox
+  (repo-relative open sandbox or null), repository (hub checkout path).
+Recording the same (repository, run, task) twice is a no-op; stats and fits read through unique_rows (content duplicates count once per repository).
 STATS (stats.json): {v, updated, rows, bands: {band: S}, tiers: {tier: S}, bands_by_tier: {tier|band: S}} with
   S = {n, ftp_n, ftp_rate, mean_s, p90_s, mean_cost}. Same rows, same stats (sorted keys, no clock in S).
 Stdlib only.
@@ -31,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import base  # noqa: E402
+import sandbox  # noqa: E402
 import state  # noqa: E402
 
 MARKERS = [("tsconfig.json", "typescript"), ("package.json", "javascript"), ("go.mod", "go"), ("Cargo.toml", "rust"),
@@ -119,8 +123,45 @@ def derive(rows: list) -> dict:  # O(R log R)
             "bands_by_tier": {k: _stat(v) for k, v in sorted(both.items())}}
 
 
+def _content_key(r: dict) -> tuple:
+    tk = r.get("tokens") if isinstance(r.get("tokens"), dict) else {}
+    return (r.get("repository"), r.get("date"), r.get("task"), r.get("duration_s"),
+            tk.get("in"), tk.get("out"), r.get("model"))
+
+
+def unique_rows(rows: list[dict]) -> list[dict]:  # O(R)
+    """Content duplicates per repository, first kept: date, task, duration, tokens in/out and model, any run id."""
+    seen: set = set()
+    out = []
+    for r in rows:
+        k = _content_key(r)
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+def feature_state(sl_dir) -> dict:  # O(file)
+    d = base.read_json(Path(sl_dir) / "feature.json", None)
+    return d if isinstance(d, dict) else {}
+
+
+def phase_of(sl_dir) -> str:  # O(file)
+    """`proto` while a prototype sandbox is open here, or (legacy) this checkout is the state's worktree, else `build`."""
+    try:
+        if sandbox.open_sandbox(Path(sl_dir)):
+            return "proto"
+        st = feature_state(sl_dir)
+        wt = st.get("worktree")
+        if wt and st.get("status") == "building" and Path(wt).resolve() == Path(sl_dir).resolve().parent:
+            return "proto"
+    except (OSError, ValueError):  # fail open: unreadable state is a build row
+        pass
+    return "build"
+
+
 def write_stats(rows: list, path) -> dict:  # O(R log R)
-    st = derive(rows)
+    st = derive(unique_rows([r for r in rows if r.get("phase") != "proto"]))
     full = dict(st, updated=datetime.now().isoformat(timespec="seconds"))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -179,6 +220,9 @@ def run_rows(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(M + B 
     lang = detect_language(Path(sl).resolve().parent)
     prime = {t: (sl / name).stat().st_size if (sl / name).is_file() else None for t, name in (("sonnet", "prime.md"), ("haiku", "prime-haiku.md"))}
     rid = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    phase = phase_of(sl)
+    st = feature_state(sl)
+    sb = sandbox.open_sandbox(sl)
     rows = []
     for r in recs:
         task = plan.by_id.get(r["task"])
@@ -187,7 +231,7 @@ def run_rows(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(M + B 
         f = flags.get(r["task"], {})
         tier = tiers.get(r["task"]) or ("haiku" if r["model"] == "haiku" else "sonnet")
         tk = r["tokens"]
-        rows.append({"v": 1, "date": date.today().isoformat(), "run": rid, "source": "run", "language": lang, "task": r["task"],
+        rows.append({"v": 1, "date": date.today().isoformat(), "run": rid, "phase": phase, "run_id": st.get("run_id"), "sandbox": sb, "source": "run", "language": lang, "task": r["task"],
                      "kind": r["kind"], "loc": r["loc"], "components": r["components"], "tests": r["tests"], "focus": cats,
                      "band": band_of(r["kind"], r["loc"], r["tests"]), "critical_path": f.get("critical_path"),
                      "slack_min": f.get("slack_min"), "tier": tier, "agent_type": r["agent_type"], "model": r["model"],
@@ -198,12 +242,32 @@ def run_rows(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(M + B 
     return rows
 
 
+def _fresh(rows: list, have: list) -> list:  # O(R + n)
+    known = {(r.get("repository"), r.get("run"), r.get("task")) for r in have}
+    return [r for r in rows if (r.get("repository"), r.get("run"), r.get("task")) not in known]
+
+
+def repository_id(sl_dir) -> str:
+    """Canonical hub checkout path, shared by linked worktrees and distinct across local repositories."""
+    checkout = Path(sl_dir).resolve().parent
+    try:
+        return state.hub_root(checkout).resolve().as_posix()
+    except (base.GitError, OSError, IndexError, ValueError):
+        return checkout.as_posix()
+
+
 def record_run(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(R + n*w)
     """Append this run's rows (global and project) and refresh both stats files."""
-    rows = run_rows(plan_path, sl_dir, run_id)
-    if rows:
-        append_rows(rows)
-        append_rows(rows, Path(sl_dir) / "history.jsonl")
+    repo = repository_id(sl_dir)
+    rows = [dict(r, repository=repo) for r in run_rows(plan_path, sl_dir, run_id)]
+    proj = Path(sl_dir) / "history.jsonl"
+    new = _fresh(rows, read_rows())  # a row already recorded for this (run, task) is not recorded again
+    if new:
+        append_rows(new)
+    new_proj = _fresh(rows, read_rows(proj))
+    if new_proj:
+        append_rows(new_proj, proj)
+    rows = new
     write_stats(read_rows(), home() / "stats.json")
     write_stats(read_rows(Path(sl_dir) / "history.jsonl"), Path(sl_dir) / "stats.json")
     return rows

@@ -81,6 +81,14 @@ def test_flow_debug(repo):
     assert (repo.root / "src" / "fix.py").is_file() and (repo.root / "tests" / "test_regress.py").is_file()
 
 
+def test_flow_research(repo):
+    ensure(repo, "research")
+    repo.write("docs/research/notes.md", "# Notes\n\nfindings\n")
+    scenario.end_flow(repo, "research")
+    repo.assert_closed_clean("research")
+    assert (repo.root / "docs" / "research" / "notes.md").is_file()
+
+
 def test_flow_review(repo):
     repo.git("checkout", "-q", "-b", "feature-x")
     repo.write("x.txt", "x\n")
@@ -104,8 +112,9 @@ def test_flow_feature(repo):
                "# Feat\n\n**Goal:** a feature.\n\n## Acceptance checks\n- it works\n")
     r = repo.cli("proto", "start", "--topic", "feat", "--run", "echo hi")
     assert r.code == 0, r.err
-    sandbox = repo.root / ".superlite" / "sandboxes" / "feat-proto"
-    assert sandbox.is_dir() and "superlite/feat-proto" in repo.git("branch", "--list")
+    boxes = list((repo.root / ".superlite" / "sandboxes").glob("*/feat"))
+    assert len(boxes) == 1 and boxes[0].is_dir() and "feat-proto" not in repo.git("branch", "--list")
+    sandbox = boxes[0]
     assert repo.cli("proto", "tryout").code == 0
     assert repo.state("feature.json")["status"] == "tryout"
     r = repo.cli("proto", "tryout", "--approve", "--ruling", "[acceptance] ok - fine - none")

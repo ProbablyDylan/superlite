@@ -69,6 +69,7 @@ def test_unreadable_settings_are_left_alone(tmp_path, monkeypatch):
 
 def test_session_start_mentions_the_suspension_only_while_it_holds(tmp_path):
     env = dict(os.environ, CLAUDE_PLUGIN_ROOT=str(ROOT), SUPERLITE_HOME=str(tmp_path / "home"))
+    env.pop("COPILOT_CLI", None)
     (tmp_path / "home").mkdir()
     quiet = subprocess.run([BASH, str(HOOK)], cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", env=env)
     assert quiet.returncode == 0
@@ -96,7 +97,7 @@ def test_peers_released_after_last_run(tmp_path, monkeypatch):
     session = SCRIPTS / "session.py"
     assert run(session, "ensure", "--slug", "a", cwd=repo).returncode == 0
     assert run(session, "create", "--slug", "b", "--worktree", cwd=repo).returncode == 0
-    wt = repo / ".superlite" / "worktrees" / "sessions" / "b"
+    wt = repo / ".claude" / "worktrees" / "sessions-b"
     run(EX, "on", cwd=repo)
     settings = repo / ".claude" / "settings.local.json"
     assert json.loads(settings.read_text(encoding="utf-8"))["enabledPlugins"][PEER] is False
