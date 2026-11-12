@@ -29,7 +29,9 @@ def _prompt(tmp_path, transcript=None, cursor=False, env_extra=None, sid="s1"):
         payload["transcript_path"] = str(transcript)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CURSOR_", "SUPERLITE_"))}
     env.update({"CLAUDE_PROJECT_DIR": str(tmp_path), "SUPERLITE_NO_SESSION_HUD": "1",
-                "SUPERLITE_NO_COST_REPORT": "1", "CLAUDE_CODE": "1"})
+                "SUPERLITE_NO_COST_REPORT": "1", "CLAUDE_CODE": "1",
+                "SUPERLITE_HOME": str(tmp_path / "_sl_home"),
+                "SUPERLITE_CONTEXT_WINDOW": "200000"})  # limit 140k (70%), step 20k
     env.update(env_extra or {})
     r = subprocess.run([BASH, str(HOOK)], input=json.dumps(payload), capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
@@ -63,11 +65,25 @@ def test_silent_under_limit_with_fresh_last_compact(tmp_path):
     assert _prompt(tmp_path, _transcript(tmp_path, 90000)) == ""
 
 
-def test_renudges_with_count(tmp_path):
+def test_quiet_after_a_nudge_until_the_context_grows_a_step(tmp_path):
     _sl(tmp_path)
     t = _transcript(tmp_path, 160000)
-    _prompt(tmp_path, t)
-    assert "request 2" in _ctx(_prompt(tmp_path, t))
+    assert "160k" in _ctx(_prompt(tmp_path, t))
+    assert _prompt(tmp_path, t) == ""                       # same size: no repeat
+    with open(t, "a", encoding="utf-8") as f:
+        f.write(_asst(175000))
+    assert _prompt(tmp_path, t) == ""                       # grew less than the 20k step
+    with open(t, "a", encoding="utf-8") as f:
+        f.write(_asst(181000))
+    ctx = _ctx(_prompt(tmp_path, t))
+    assert "reminder 2" in ctx and "181k" in ctx and "before anything else" not in ctx
+    assert _prompt(tmp_path, t) == ""                       # and quiet again
+
+
+def test_default_window_does_not_nudge_at_old_limit(tmp_path):
+    _sl(tmp_path)
+    t = _transcript(tmp_path, 180000)   # about where Dorado was nagged on a 1M window
+    assert _prompt(tmp_path, t, env_extra={"SUPERLITE_CONTEXT_WINDOW": ""}) == ""
 
 
 def test_confirms_compact(tmp_path):
@@ -127,8 +143,10 @@ def test_sessions_sharing_superlite_keep_separate_counts(tmp_path):
     a.write_text(_asst(160000), encoding="utf-8")
     b.write_text(_asst(160000), encoding="utf-8")
     _prompt(tmp_path, a)
-    assert "request 2" in _ctx(_prompt(tmp_path, a))
-    assert "request" not in _ctx(_prompt(tmp_path, b))
+    with open(a, "a", encoding="utf-8") as f:
+        f.write(_asst(181000))
+    assert "reminder 2" in _ctx(_prompt(tmp_path, a))
+    assert "reminder" not in _ctx(_prompt(tmp_path, b))
 
 
 def test_missing_transcript_falls_back_to_timer(tmp_path):

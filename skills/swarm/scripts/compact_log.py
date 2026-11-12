@@ -2,6 +2,7 @@
 
     compact_log.record_nudge(sl_dir, tokens, limit, now, boundary_line=0, transcript="") -> int
     compact_log.reconcile(sl_dir, transcript, now) -> "none" | "pending" | "done"
+    compact_log.last_nudge_tokens(sl_dir, transcript) -> int | None   tokens at the pending nudge, if any
 
 State lives in <sl_dir>/compact_state.json as {"sessions": {<transcript path>: entry}}, so sessions
 sharing one .superlite keep separate request counts, missed status and boundary lines. Events go to
@@ -20,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-__all__ = ["record_nudge", "reconcile"]
+__all__ = ["record_nudge", "reconcile", "last_nudge_tokens"]
 
 context_tokens = None  # lazily imported; tests may replace it
 _MISSED_AT = 3
@@ -117,6 +118,17 @@ def _log(sl_dir: str, ev: dict) -> None:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+
+def last_nudge_tokens(sl_dir: str, transcript: str) -> int | None:
+    """Token count at this session's last unanswered nudge; None when none is pending."""
+    st = _load(sl_dir, transcript)
+    if not st or not st.get("count"):
+        return None
+    try:
+        return int(st.get("tokens", 0))
+    except (TypeError, ValueError):
+        return None
 
 
 def record_nudge(sl_dir: str, tokens: int, limit: int, now: float, boundary_line: int = 0,

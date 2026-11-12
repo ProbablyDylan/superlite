@@ -33,3 +33,11 @@ How much the hooks hold the main session back. `superlite-cli guard set light|st
 The feature flow's prototype still builds in its own throwaway worktree in both modes.
 
 In both modes the hooks look for a run at or above the working directory but never above a checkout root (a folder with `.git`), the same rule as the scripts, so a run in one repo never governs another.
+
+## Compact nudge
+
+On each prompt the hook reads the live context size from the transcript. Once it passes the limit, the next prompt carries one line asking for the host's compact command. After that it stays quiet until the context grows another tenth of the window, or a compact clears it.
+
+The limit is `compact_share` of `context_window`, by default 70% of 1,000,000 tokens (the hook cannot see the real window size, so set it if yours is smaller). Each key is read from the env (`SUPERLITE_CONTEXT_WINDOW`, `SUPERLITE_COMPACT_SHARE`), else the project's `superlite.json`, else `preferences.json` in the superlite home (per machine), else the default. `compact_share` takes `0.7` or `70`. An absolute `compact_tokens` (`SUPERLITE_COMPACT_TOKENS`) wins over the share. `SUPERLITE_NO_AUTOCOMPACT=1` turns the nudge off.
+
+Cost grows with context: every turn re-reads it, so a lower share means cheaper turns and more compacts.

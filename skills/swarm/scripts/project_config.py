@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-KEYS = frozenset({"version", "cap", "gitignore", "hosts", "testprobe", "models", "compact_tokens"})
+KEYS = frozenset({"version", "cap", "gitignore", "hosts", "testprobe", "models", "compact_tokens",
+                  "context_window", "compact_share"})
 DEFAULT_CAP = 10
 
 

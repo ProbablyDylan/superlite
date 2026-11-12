@@ -47,6 +47,9 @@ def run(sl_dir: str, transcript: str, host: str, now: float) -> str:
     limit = compact_due.limit(root)
     if tokens < limit:
         return ""  # readable transcript: the live count (even none yet) is authoritative
+    prev = compact_log.last_nudge_tokens(sl_dir, transcript)
+    if prev is not None and tokens < prev + compact_due.step(root):
+        return ""  # nudged already: quiet until the context grows another step, or a compact clears it
     b = snapshot["boundary"]
     req = compact_log.record_nudge(sl_dir, tokens, limit, now,
                                    boundary_line=int(b["line"]) if b else 0, transcript=transcript)
