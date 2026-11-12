@@ -368,3 +368,14 @@ def test_topic_switch_keeps_project_files_from_upstream(tmp_path, light):
     (sl / "research").mkdir()
     _ensure(repo, "rivers")
     assert (sl / "test-map.json").is_file() and (sl / "peers.json").is_file() and (sl / "research").is_dir()
+
+
+def test_topics_status_reads_fix_rows(tmp_path, light, monkeypatch):
+    repo = _repo(tmp_path)
+    sl = repo / ".superlite"
+    _ensure(repo, "bay")
+    (sl / "stable.json").write_text(json.dumps({"stable": ["T1"], "fix": [{"task": "T2", "reasons": ["SIZE"]}]}))
+    (sl / "checkpoints.json").write_text(json.dumps({"entries": [{"task": "T1"}]}))
+    cp = run(SCRIPTS / "topics.py", "status", cwd=repo)
+    assert cp.returncode == 0, cp.both
+    assert "bay" in cp.out

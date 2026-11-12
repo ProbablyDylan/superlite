@@ -112,7 +112,8 @@ def _goal(plan) -> str:
 def summary(d: Path, project: Path, name: str) -> dict:  # O(files)
     """Plain facts about one run folder: name, goal, tasks done and planned, open or finished, last change."""
     st = base.read_json(d / "stable.json", {})
-    planned = set((st.get("stable") or []) + (st.get("fix") or [])) if isinstance(st, dict) else set()
+    ids = (st.get("stable") or []) + (st.get("fix") or []) if isinstance(st, dict) else []
+    planned = {e.get("task") if isinstance(e, dict) else e for e in ids} - {None}   # fix rows: {"task": "T2", ...}
     ck = base.read_json(d / "checkpoints.json", {})
     done = {e.get("task") for e in (ck.get("entries") or []) if isinstance(e, dict)} & planned if planned else set()
     files = [f for e in entries(d) for f in ([e] if e.is_file() else e.rglob("*")) if f.is_file()]
