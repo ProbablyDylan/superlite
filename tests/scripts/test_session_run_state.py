@@ -99,7 +99,9 @@ def test_session_start_no_row_falls_back_to_orchestrator(hub):
 
 def test_session_start_injects_upgrade_skill_once_per_version(hub):
     first = _start(hub)
-    marker = hub / ".git" / "info" / "superlite-upgrade-scan-4.0.0"
+    import json
+    version = json.loads((Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json").read_text())["version"]
+    marker = hub / ".git" / "info" / f"superlite-upgrade-scan-{version}"
     assert "Review this repository against the changes in superlite" in first
     assert "Do not move, edit, or delete anything" in first
     assert marker.is_file() and not list((hub / ".superlite").glob("upgrade-scan-*"))
