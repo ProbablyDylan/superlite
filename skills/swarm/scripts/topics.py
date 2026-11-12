@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import base  # noqa: E402
+import run_archive  # noqa: E402
 import session_registry as R  # noqa: E402
 import state  # noqa: E402
 
@@ -26,8 +27,7 @@ PARKED = "parked"
 ARCHIVE = "archive"
 MARKERS = ("stable.json", "prime.md", "pool.json")
 # Not run state: they describe the project, or hold other runs.
-KEEP = set(R.STATIONARY) | {TOPIC, PARKED, ARCHIVE, "setup.done", "test-cmd.json", "probes", "history.jsonl",
-                            "agent-specs.json", "host-models.json", "__pycache__"}
+KEEP = set(R.STATIONARY) | set(run_archive.KEEP) | {TOPIC, "setup.done", "probes", "history.jsonl", "__pycache__"}
 
 
 def entries(sl: Path) -> list:  # O(entries)

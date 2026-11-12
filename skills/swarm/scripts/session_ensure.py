@@ -373,9 +373,11 @@ def _park_first(root: Path, reg: dict, host: Path, keep: bool, note: str | None,
 
 def cmd_create(a) -> int:  # O(tree)
     slug = validate_slug(a.slug)
-    import guard, topics
-    if guard.light():  # as in cmd_ensure: no branch, no worktree; the run works in place
-        return topics.ensure_in_place(start_dir(a), slug)
+    import guard
+    if guard.light():  # no branch or worktree; unlike ensure, the live topic stays as it is
+        print("session: off (guard light): no branch or worktree; work here, on the current branch")
+        session_line(start_dir(a), slug, "-")
+        return 0
     root = hub_root(start_dir(a))
     with registry_lock(root):
         return guarded("create", lambda: _create(root, slug, a))

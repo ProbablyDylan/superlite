@@ -329,3 +329,42 @@ def test_topics_status_and_brief(tmp_path, light):
     assert "bay" in _session_start(repo, tmp_path / "home") and "Parked superlite topics" in _session_start(repo, tmp_path / "home")
     _ensure(repo, "bay")
     assert run(SCRIPTS / "topics.py", "brief", cwd=repo).out == ""   # nothing parked but rivers, which has no run yet
+
+
+# ---- merge with upstream: session create, the run archive ----
+
+def test_light_session_create_stays_in_place_and_keeps_the_topic(tmp_path, light):
+    import subprocess
+    repo = _repo(tmp_path)
+    sl = repo / ".superlite"
+    _ensure(repo, "bay")
+    (sl / "pool.json").write_text('{"agents": ["bay"]}')
+    cp = run(SCRIPTS / "session.py", "create", "--slug", "bay-int", "--worktree", cwd=repo)
+    assert cp.returncode == 0, cp.both
+    assert "guard light" in cp.out and f"SESSION worktree={repo.as_posix()}" in cp.out
+    assert (sl / "topic.txt").read_text().strip() == "bay" and (sl / "pool.json").is_file()   # nothing parked
+    assert not (sl / "parked").exists()
+    wts = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout.strip().splitlines()
+    assert len(wts) == 1
+
+
+def test_run_archive_leaves_other_topics_alone(tmp_path):
+    import run_archive
+    sl = tmp_path / ".superlite"
+    (sl / "parked" / "rivers").mkdir(parents=True)
+    (sl / "archive" / "old-2026-11-01").mkdir(parents=True)
+    (sl / "progress.md").write_text("x\n")
+    names = {p.name for p in run_archive.entries(sl)}
+    assert "progress.md" in names and not names & {"parked", "archive"}
+
+
+def test_topic_switch_keeps_project_files_from_upstream(tmp_path, light):
+    repo = _repo(tmp_path)
+    sl = repo / ".superlite"
+    _ensure(repo, "bay")
+    (sl / "pool.json").write_text("{}")
+    for name in ("test-map.json", "peers.json"):
+        (sl / name).write_text("{}")
+    (sl / "research").mkdir()
+    _ensure(repo, "rivers")
+    assert (sl / "test-map.json").is_file() and (sl / "peers.json").is_file() and (sl / "research").is_dir()
