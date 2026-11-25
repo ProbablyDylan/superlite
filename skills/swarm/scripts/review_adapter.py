@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import planfile  # noqa: E402
+import _pyrun  # noqa: E402
 import state  # noqa: E402
 from review_contract import (HTTP_LINE_RE, ContractLine, Mismatch, ToolError, call_in_contract,  # noqa: E402
                              layout, locate, module_name, owned_files, planned_items, probe_entries, project_env,
@@ -144,7 +145,7 @@ class ServerHandle:
         self._out = open(self.out_path, "wb")
         self._err = open(self.err_path, "wb")
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", _SERVER_RUNNER, json.dumps({"target": target, "args": args})],
+            [*_pyrun.project_python_or_self(root), "-c", _SERVER_RUNNER, json.dumps({"target": target, "args": args})],
             cwd=root, env=project_env(root), stdout=self._out, stderr=self._err, stdin=subprocess.DEVNULL)
         self.info: dict | None = None
         self.error: str | None = None

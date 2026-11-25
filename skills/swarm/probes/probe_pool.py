@@ -14,6 +14,7 @@ import types
 from pathlib import Path
 
 from probe_common import ENTRY_TIMEOUT, HERE, IS_WIN, frames_from_text
+import _pyrun  # noqa: E402  (probe_common put the scripts dir on sys.path)
 
 import base  # noqa: E402 | scripts dir is on sys.path through probe_common
 
@@ -51,7 +52,7 @@ class Worker:
         self.cfg = cfg
         self.dead = False
         self.errf = tempfile.NamedTemporaryFile(prefix="probe-worker-", suffix=".err", delete=False)
-        cmd = [sys.executable, "-X", "utf8", str(HERE / "probe_run.py"), "--worker",
+        cmd = [*_pyrun.project_python_or_self(cfg.root), "-X", "utf8", str(HERE / "probe_run.py"), "--worker",
                "--root", str(cfg.root), "--adapter", str(cfg.adapter)]
         kw: dict = {}
         if IS_WIN:

@@ -2,6 +2,7 @@
 
 > **Erratum (2026-10-17, from the 0.2 session).** Smoke tests (0.2 design §9) invalidate parts of this document:
 > - **A "shared wave preamble" with the task tail in the same brief does not share cache.** Siblings hit only the ~4.7k system-and-tools prefix. Use **prime-then-assign** instead: an identical first message (preamble + plan + spec sections + sandbox manifest path) answered with READY, then each task sent by SendMessage. Wherever this doc says the task tail follows the preamble in the brief, read it as the next message.
+> - **Amended 2026-11-24 (fork):** prime-then-assign is dropped. Claude Code now makes a subagent hand back a report when its turn ends, so the READY turn came back as an empty hand-back (33 of 147 agents in one Dorado session) and cost a coordinator turn per agent. The prime still goes first in the launch prompt, followed by `Your batch:` and the task; the prime's cache sharing across siblings is given up knowingly (a few thousand tokens per agent).
 > - **A sibling hit-rate target of 80% is reachable only with prime-then-assign.** Measured: siblings 2..n read 100% of the prime.
 > - **Agent files written mid-session are not loaded.** Agent definitions load at session start, so per-plan generated agents can't carry shared context.
 > - **Forks run on the session model and in `-p` need `CLAUDE_CODE_FORK_SUBAGENT=1`.** No per-fork model or effort is documented. A Fable session therefore means Fable-priced forks.

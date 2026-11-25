@@ -392,5 +392,19 @@ def test_frozen_is_a_note_under_guard_light(tmp_path, monkeypatch):
     p = make_plan(tmp_path, [{"id": "T1", "time": 3, "title": "first reworded"}, {"id": "T2", "time": 2}])
     cp = pt("lint", "--stable", "--plan", p)
     assert cp.returncode == 0, cp.both
-    assert "NOTE: FROZEN: T1 block changed after dispatch" in cp.out and "(info, guard light)" in cp.out
+    assert "NOTE: FROZEN: T1 block changed after dispatch" in cp.out and "listed for dispatch again" in cp.out
     assert "PLAN: FROZEN" not in cp.out and _log(tmp_path)[-1]["frozen"] == 0
+    assert cp.out.rstrip().splitlines()[-1] == "DISPATCH NOW: T1 T2"  # T1 never silently dropped as already sent
+
+
+def test_new_plan_reusing_a_stale_runs_ids_dispatches_them_under_guard_light(tmp_path, monkeypatch):
+    """Dorado: a finished-but-never-closed run's pool and lint state made the next plan's T1-T3 look dispatched."""
+    monkeypatch.setenv("SUPERLITE_GUARD", "light")
+    pt("lint", "--stable", "--plan", _consumer_plan(tmp_path))
+    _pool(tmp_path, "T1", "T2", "T3")
+    p = make_plan(tmp_path, [{"id": "T1", "time": 2, "title": "new one", "produces": "g(y: str) -> str"},
+                             {"id": "T2", "time": 2, "title": "new two"}, {"id": "T3", "time": 2, "title": "new three"}],
+                  name="next.md")
+    cp = pt("lint", "--stable", "--plan", p)
+    assert cp.returncode == 0, cp.both
+    assert cp.out.rstrip().splitlines()[-1] == "DISPATCH NOW: T1 T2 T3", cp.out

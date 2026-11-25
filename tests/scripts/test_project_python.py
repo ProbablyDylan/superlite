@@ -65,3 +65,24 @@ def test_venv_package_must_match_the_venvs_own_python_version(tmp_path, monkeypa
     (tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "xdist").mkdir(parents=True)
     assert _pyrun.pytest_cmd(tmp_path) == [str(py), "-m", "pytest"]
     assert _pyrun.has_xdist(tmp_path)
+
+
+def test_uv_project_whose_venv_lacks_pytest_uses_uv(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
+    monkeypatch.setattr(_pyrun.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None)
+    _venv(tmp_path, False)
+    (tmp_path / "uv.lock").write_text("", encoding="utf-8")
+    assert _pyrun.pytest_cmd(tmp_path) == ["/bin/uv", "run", "--frozen", "--with", "pytest", "python", "-m", "pytest"]
+    (tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "xdist").mkdir(parents=True)
+    assert _pyrun.has_xdist(tmp_path)  # uv runs the project's .venv: its xdist counts
+
+
+def test_requirements_txt_project_gets_a_uv_env_with_its_requirements(tmp_path, monkeypatch):
+    """ArchivistBot: no venv, no uv.lock; its deps (gallery_dl) come from requirements.txt."""
+    monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
+    monkeypatch.setattr(_pyrun.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None)
+    (tmp_path / "requirements.txt").write_text("gallery-dl\n", encoding="utf-8")
+    req = str(tmp_path.resolve() / "requirements.txt")
+    assert _pyrun.project_python(tmp_path) == ["/bin/uv", "run", "--no-project", "--with-requirements", req, "python"]
+    assert _pyrun.pytest_cmd(tmp_path) == ["/bin/uv", "run", "--no-project", "--with-requirements", req,
+                                           "--with", "pytest", "python", "-m", "pytest"]

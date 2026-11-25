@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import planfile  # noqa: E402
+import _pyrun  # noqa: E402
 
 HTTP_LINE_RE = re.compile(r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(/\S*)\s*(.*)$")
 TEST_PATH_RE = re.compile(r"(^|/)(tests?/|test_[^/]*$|[^/]*_test\.py$)")
@@ -402,7 +403,7 @@ def read_real(root: Path, located: list[tuple[str, list[str]]]) -> list[dict]:  
     results: list[dict] = []
     if todo:
         try:
-            proc = subprocess.run([sys.executable, "-c", _INTROSPECT, json.dumps(todo)], cwd=root,
+            proc = subprocess.run([*_pyrun.project_python_or_self(root), "-c", _INTROSPECT, json.dumps(todo)], cwd=root,
                                   env=project_env(root), capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", timeout=60)
             line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("@@SIG@@")), None)

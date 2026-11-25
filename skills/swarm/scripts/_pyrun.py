@@ -60,7 +60,7 @@ def venv_has(py: Path, package: str) -> bool:  # O(file) + O(1) stats, no proces
 def project_python(root=".") -> list | None:  # O(P) PATH search
     """The interpreter that has the PROJECT's dependencies, as a command prefix, or None for a project with none of
     these: $SUPERLITE_PROJECT_PYTHON (a file, or a command such as `poetry run python`), else <root>/.venv or venv,
-    else `uv run --frozen python` when uv.lock exists and uv is on PATH. Superlite's own interpreter (sys.executable) runs the
+    else `uv run --frozen python` when uv.lock exists and uv is on PATH, else a uv env from requirements.txt. Superlite's own interpreter (sys.executable) runs the
     scripts; it usually lacks the project's packages (numpy, ...), so project code never runs under it when this
     finds one."""
     env = os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip()
@@ -70,27 +70,49 @@ def project_python(root=".") -> list | None:  # O(P) PATH search
     py = _venv_python(r)
     if py:
         return [str(py)]
+    return _uv_python(r)
+
+
+def project_python_or_self(root=".") -> list:  # O(P): project_python, else superlite's own interpreter
+    try:
+        return project_python(root) or [sys.executable]
+    except OSError:
+        return [sys.executable]
+
+
+def _uv_python(r: Path) -> list | None:  # O(P) PATH search
     uv = shutil.which("uv")
     if uv and (r / "uv.lock").is_file():
         return [uv, "run", "--frozen", "python"]  # --frozen: never rewrite the project's uv.lock
+    if uv and (r / "requirements.txt").is_file():  # no venv, no lock: an ephemeral env from requirements.txt
+        return [uv, "run", "--no-project", "--with-requirements", str(r / "requirements.txt"), "python"]
     return None
 
 
 def has_xdist(root=".") -> bool:  # O(file) stats: pytest-xdist in the interpreter pytest_cmd(root) picks
     venv = _venv_python(Path(root).resolve())
-    if venv and venv_has(venv, "pytest") and not os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip():
-        return venv_has(venv, "xdist")
+    try:
+        cmd = pytest_cmd(root)
+    except PytestUnavailable:
+        return False
+    if venv and cmd[0] != sys.executable and not os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip():
+        return venv_has(venv, "xdist")  # the project's venv, run directly or by `uv run`
     return importlib.util.find_spec("xdist") is not None
 
 
 def pytest_cmd(root="."):  # O(P) PATH search
-    """pytest under the project's interpreter (project_python) when it has one, else under superlite's own."""
-    proj = project_python(root)
-    venv = _venv_python(Path(root).resolve())
-    if proj and proj[1:] == ["run", "--frozen", "python"] and Path(proj[0]).stem == "uv":  # project env + pytest if it lacks one
-        return [proj[0], "run", "--frozen", "--with", "pytest", "python", "-m", "pytest"]
-    if proj and not (venv and proj == [str(venv)] and not venv_has(venv, "pytest")):  # a venv without pytest falls through
-        return [*proj, "-m", "pytest"]
+    """pytest under the project's interpreter: SUPERLITE_PROJECT_PYTHON, else its venv when that has pytest, else
+    `uv run --frozen --with pytest` in a uv project; else superlite's own interpreter, else a bare uv."""
+    env = os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip()
+    if env:
+        return [*project_python(root), "-m", "pytest"]
+    r = Path(root).resolve()
+    venv = _venv_python(r)
+    if venv and venv_has(venv, "pytest"):
+        return [str(venv), "-m", "pytest"]
+    proj = _uv_python(r)
+    if proj:  # the project's uv environment, plus pytest if it lacks one
+        return [*proj[:-1], "--with", "pytest", "python", "-m", "pytest"]
     if have_pytest():
         return [sys.executable, "-m", "pytest"]
     uv = shutil.which("uv")

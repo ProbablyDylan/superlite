@@ -398,6 +398,14 @@ def _frozen_line(t: str, plan: Plan, old: dict, sent: set, run_dir: Path, interf
     return f"FROZEN: {t} interface changed after dispatch: {_iface_str(old_if[t])} -> {_iface_str(new_i)}; add a follow-up fix task"
 
 
+def _forget(old: dict, sent: set, ids: set) -> tuple[dict, set]:
+    """The saved lint state and the dispatched set without `ids`: their record is treated as stale (guard light)."""
+    def drop(v):
+        return {k: x for k, x in v.items() if k not in ids} if isinstance(v, dict) else (
+            [x for x in v if x not in ids] if isinstance(v, list) else v)
+    return {k: drop(v) for k, v in old.items()}, set(sent) - ids
+
+
 def _freeze(plan: Plan, old: dict, sent: set, run_dir: Path, stable: list, fix: list, interfaces: dict):
     """Dispatched tasks keep the interface and block they were sent with. Returns (FROZEN lines, stable, fix)."""
     frozen: list[str] = []
@@ -512,10 +520,13 @@ def cmd_lint_stable(args) -> int:  # O(lint + n*k*s)
     interfaces = {t: task_interface(plan.by_id[t]) for t in stable if t in plan.by_id}
     old = base.read_json(out, {})
     sent = dispatched_tasks(run_dir)
+    before = (list(stable), list(fix), dict(interfaces))
     frozen, stable, fix = _freeze(plan, old, sent, run_dir, stable, fix, interfaces)
-    if frozen and guard.light():  # guard light: the run state informs, never blocks (it is often a stale earlier run)
-        warnings = list(warnings) + [f"NOTE: {f} (info, guard light)" for f in frozen]
-        frozen = []
+    if frozen and guard.light():  # the run state informs, never blocks: often it is a stale earlier run
+        warnings = list(warnings) + [f"NOTE: {f} (info, guard light: listed for dispatch again)" for f in frozen]
+        old, sent = _forget(old, sent, {f.split()[1] for f in frozen})
+        stable, fix, interfaces = before
+        frozen, stable, fix = _freeze(plan, old, sent, run_dir, stable, fix, interfaces)
     stable.sort(key=nkey)
     old_blocks = old.get("blocks") or {}
     blocks = {t: (old_blocks[t] if t in sent and t in old_blocks else block_hash(plan.by_id[t]))
