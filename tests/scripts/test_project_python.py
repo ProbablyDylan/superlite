@@ -48,3 +48,20 @@ def test_uv_project_keeps_its_dependencies(tmp_path, monkeypatch):
 def test_no_project_environment_is_unchanged(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
     assert _pyrun.project_python(tmp_path) is None
+
+
+def test_venv_package_must_match_the_venvs_own_python_version(tmp_path, monkeypatch):
+    """After a system Python upgrade a venv can keep lib/python3.11/site-packages/pytest that its python3.12 never
+    reads: that pytest does not count."""
+    monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
+    py = tmp_path / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text("", encoding="utf-8")
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\nversion_info = 3.12.4\n", encoding="utf-8")
+    (tmp_path / ".venv" / "lib" / "python3.11" / "site-packages" / "pytest").mkdir(parents=True)
+    assert not _pyrun.venv_has(py, "pytest")
+    assert str(py) not in _pyrun.pytest_cmd(tmp_path)
+    (tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "pytest").mkdir(parents=True)
+    (tmp_path / ".venv" / "lib" / "python3.12" / "site-packages" / "xdist").mkdir(parents=True)
+    assert _pyrun.pytest_cmd(tmp_path) == [str(py), "-m", "pytest"]
+    assert _pyrun.has_xdist(tmp_path)

@@ -14,10 +14,11 @@ import state  # noqa: E402
 DEFAULT_LOG = f"{state.DIR_NAME}/incidents.jsonl"
 KINDS = ("test-failure", "exception", "workaround", "spec-ambiguity",
          "assumption", "flaky", "perf", "unsure", "verified")
-# Words agents reach for that mean a known kind; anything else is still refused with the list.
+# Words agents reach for that mean a known kind; anything else is still refused with the list. Never alias to
+# `verified`: a verified row closes the file's open incidents, so "fixed" must be said on purpose.
 KIND_ALIASES = {"bug": "exception", "error": "exception", "crash": "exception", "failure": "test-failure",
-                "failing-test": "test-failure", "fixed": "verified", "fix": "verified", "resolved": "verified",
-                "hack": "workaround", "slow": "perf", "question": "unsure", "ambiguity": "spec-ambiguity"}
+                "failing-test": "test-failure", "hack": "workaround", "slow": "perf", "question": "unsure",
+                "ambiguity": "spec-ambiguity"}
 CONFIDENCE = ("low", "medium", "high")
 MAX_CONTEXT = 200
 

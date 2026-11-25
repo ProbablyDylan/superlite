@@ -182,7 +182,10 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
       [ -n "$pr" ] || { jstr description; pr="$REPLY"; }
       # A launch with the prime: only its `Your batch:` line names tasks (a regex: ${pr#*...} is quadratic).
       prime_only=0
-      re_end='End of the superlite prime\.(.*)$'; re_bl='Your batch:[[:space:]]*([^\\]*)'; re_t='T[0-9]'
+      # The LAST marker: a full prime embeds the plan, which may quote the marker and a `Your batch:` example.
+      # Only the ids at the start of the batch line count: "Your batch: T3 - after T1" is the batch T3.
+      re_end='.*End of the superlite prime\.(.*)$'; re_t='T[0-9]'
+      re_bl='Your batch:[[:space:]]*(T[0-9]+[a-z]?([[:space:]]*,?[[:space:]]*T[0-9]+[a-z]?)*)'
       if [[ $pr =~ $re_end ]]; then
         pr="${BASH_REMATCH[1]}"
         if [[ $pr =~ $re_bl ]]; then pr="${BASH_REMATCH[1]}"

@@ -17,6 +17,7 @@ its process tree (it runs run_tree itself); callers only ever kill the PID they 
 """
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,16 +35,26 @@ def have_pytest():
 
 
 def _venv_python(root: Path) -> Path | None:  # O(1) stats
+    exe = "Scripts/python.exe" if os.name == "nt" else "bin/python"
     for d in (".venv", "venv"):
-        for exe in ("bin/python", "Scripts/python.exe"):
-            if (root / d / exe).is_file():
-                return root / d / exe
+        if (root / d / exe).is_file():
+            return root / d / exe
     return None
 
 
-def _venv_has_pytest(py: Path) -> bool:  # O(site dirs) stats, no process
+def venv_has(py: Path, package: str) -> bool:  # O(file) + O(1) stats, no process
+    """Whether the venv of interpreter `py` has `package` in the site-packages its OWN Python version reads
+    (pyvenv.cfg's version; a lib/python3.11 left over after an upgrade to 3.12 does not count)."""
     venv = py.parent.parent
-    return any(venv.glob("lib/python*/site-packages/pytest")) or (venv / "Lib" / "site-packages" / "pytest").is_dir()
+    if os.name == "nt":
+        return (venv / "Lib" / "site-packages" / package).is_dir()
+    try:
+        cfg = (venv / "pyvenv.cfg").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        cfg = ""
+    m = re.search(r"^version(?:_info)?\s*=\s*(\d+)\.(\d+)", cfg, re.M)
+    pattern = f"lib/python{m.group(1)}.{m.group(2)}/site-packages/{package}" if m else f"lib/python*/site-packages/{package}"
+    return any(venv.glob(pattern))
 
 
 def project_python(root=".") -> list | None:  # O(P) PATH search
@@ -65,13 +76,20 @@ def project_python(root=".") -> list | None:  # O(P) PATH search
     return None
 
 
+def has_xdist(root=".") -> bool:  # O(file) stats: pytest-xdist in the interpreter pytest_cmd(root) picks
+    venv = _venv_python(Path(root).resolve())
+    if venv and venv_has(venv, "pytest") and not os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip():
+        return venv_has(venv, "xdist")
+    return importlib.util.find_spec("xdist") is not None
+
+
 def pytest_cmd(root="."):  # O(P) PATH search
     """pytest under the project's interpreter (project_python) when it has one, else under superlite's own."""
     proj = project_python(root)
     venv = _venv_python(Path(root).resolve())
     if proj and proj[1:] == ["run", "--frozen", "python"] and Path(proj[0]).stem == "uv":  # project env + pytest if it lacks one
         return [proj[0], "run", "--frozen", "--with", "pytest", "python", "-m", "pytest"]
-    if proj and not (venv and proj == [str(venv)] and not _venv_has_pytest(venv)):  # a venv without pytest falls through
+    if proj and not (venv and proj == [str(venv)] and not venv_has(venv, "pytest")):  # a venv without pytest falls through
         return [*proj, "-m", "pytest"]
     if have_pytest():
         return [sys.executable, "-m", "pytest"]

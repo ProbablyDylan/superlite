@@ -24,4 +24,5 @@ def test_classname_with_empty_parts_does_not_crash(tmp_path, monkeypatch):
     (tmp_path / "tests" / "test_y.py").write_text("", encoding="utf-8")
     assert run_tests.case_file({"classname": "tests..test_y.TestY", "name": "t"}) == "tests/test_y.py"
     assert run_tests.case_file({"classname": ".", "name": "t"}) == "t"
+    assert run_tests.case_file({"classname": "", "name": "a./.b"}) == "a./.b"  # "/" is no module part
     assert run_tests.failure_line({"classname": "", "name": ""}, "boom", 7) == 7

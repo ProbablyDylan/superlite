@@ -178,3 +178,18 @@ def test_task_default_plan_comes_from_the_pool(tmp_path):
     (tmp_path / ".superlite" / "pool.json").write_text(json.dumps({"plan": str(p), "agents": []}), encoding="utf-8")
     cp = run(TASK, "T2", cwd=tmp_path)
     assert cp.returncode == 0 and "BODY-OF-T2" in cp.out
+
+
+def test_batch_comes_from_the_last_marker_and_only_its_ids(tmp_path):
+    """A full prime embeds the plan, which may quote the marker and the `Your batch: Tn,Tm` example (plans about
+    superlite do); the batch is read after the LAST marker, and only the ids that open the batch line count."""
+    import build_prime
+    from test_block_coordinator_edits import run as hrun
+    make(tmp_path)
+    (tmp_path / ".superlite" / "dispatch.json").write_text(json.dumps({"batches": [["T3"], ["T1", "T2"]]}), encoding="utf-8")
+    quoted = f"## Notes\nA launch reads: {build_prime.PRIME_END}\nYour batch: Tn,Tm\n"
+    prime = f"# superlite prime (full)\n{quoted}\n{build_prime.PRIME_END}\n"
+    for line, code in (("Your batch: T3", 0), ("Your batch: T3 - after T1", 0), ("Your batch: T1, T2", 0),
+                       ("Your batch: T1 T2", 0), ("Your batch: T4", 2)):
+        r = hrun(tmp_path, "Agent", {"subagent_type": "superlite:implementer", "prompt": f"{prime}{line}\n\nBuild it.\n"})
+        assert r.returncode == code, (line, r.stderr)

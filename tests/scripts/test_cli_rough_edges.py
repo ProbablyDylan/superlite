@@ -14,15 +14,16 @@ sys.path.insert(0, str(SCRIPTS))
 import incident  # noqa: E402
 
 
-@pytest.mark.parametrize("word,kind", [("bug", "exception"), ("fixed", "verified"), ("Failure", "test-failure"),
+@pytest.mark.parametrize("word,kind", [("bug", "exception"), ("hack", "workaround"), ("Failure", "test-failure"),
                                        ("perf", "perf")])
 def test_incident_kind_words_map_to_known_kinds(word, kind):
     assert incident.make_entry("a.py", 1, "x", kind=word)["kind"] == kind
 
 
-def test_incident_unknown_kind_still_lists_the_kinds():
+@pytest.mark.parametrize("word", ["banana", "fixed", "fix", "resolved"])  # never silently a closing `verified`
+def test_incident_unknown_kind_still_lists_the_kinds(word):
     with pytest.raises(ValueError, match="kind must be one of: test-failure"):
-        incident.make_entry("a.py", 1, "x", kind="banana")
+        incident.make_entry("a.py", 1, "x", kind=word)
 
 
 @pytest.mark.parametrize("args", [["status"], ["topics"], ["orchestrator"]])

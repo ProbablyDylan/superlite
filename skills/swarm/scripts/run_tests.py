@@ -41,7 +41,6 @@ Stdlib only.
 import argparse
 import json
 import os
-import importlib.util
 import re
 import shlex
 import sys
@@ -223,7 +222,7 @@ def case_file(case):  # O(d) stats, O(d^2) path work (stats are uncached)
     cn = case.get("classname") or ""
     if re.search(r"[\\/]|\.(?:[jt]sx?|go|rs|cs)$", cn):  # a path-like classname (vitest, jest, go, cargo): use it as the file
         return cn.replace("\\", "/")
-    parts = [x for x in (cn or case.get("name") or "").split(".") if x]  # pytest collection error: no classname, module in name
+    parts = [x for x in (cn or case.get("name") or "").split(".") if x.isidentifier()]  # no classname: module in name
     while parts and not Path(*parts).with_suffix(".py").exists():
         parts.pop()
     if parts:
@@ -430,9 +429,8 @@ def make_reporter(a, label, paths):
     return report
 
 
-def serial_addopts():  # O(size of pyproject) -> ["-o", "addopts=..."] when xdist flags would break pytest, else []
-    """addopts ask for xdist but it is not installed (pytest would exit 4): run serially, keeping the other addopts."""
-    if importlib.util.find_spec("xdist"):
+def serial_addopts():  # O(size of pyproject) -> ["-o", "addopts=..."]: addopts ask for xdist that pytest's Python lacks
+    if pyrun.has_xdist():  # in the Python that pytest_cmd runs pytest under
         return []
     try:
         import tomllib
