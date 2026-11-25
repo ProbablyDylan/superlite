@@ -67,7 +67,8 @@
    7. Tests       Always in the background. A hung test is reported as
                   SUSPECT HANG, never left to look like a slow run.
    8. Review      Package reviewers fix what they find. One fresh final
-                  reviewer reads a review packet and lists findings by tier.
+                  reviewer starts from a review packet, reads the code itself
+                  and lists findings by tier.
    9. Fix         Fixers by tier: Sonnet, Sonnet high effort, then Opus. A
                   tier that fails twice escalates.
   10. Finish      A report: time and cost, projected against actual, the

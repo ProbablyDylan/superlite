@@ -407,7 +407,7 @@ def test_d13_a_checkpoint_accepts_regression_tests_from_any_task(repo):
 
 
 
-# ---------------------------------------------------------------- D20, D25: the final reviewer sees only the packet
+# ---------------------------------------------------------------- D20, D25: the packet is capped and names no run-state files
 
 def test_d20_d25_the_packet_stands_alone_and_is_capped(repo):
     plan = write_plan(repo, {"T1": {}, "T2": {}}, [])

@@ -1,4 +1,4 @@
-"""Review packet: one size-capped file the reviewer reads in a single turn.
+"""Review packet: one size-capped map the final reviewer starts from before it reads the changed code.
 
     superlite-cli plan packet --plan PLAN.md [--root .] [--log F] [--probes DIR] [--out F]
                               [--max-tokens 20000] [--tests F] [--base REF]
@@ -6,6 +6,8 @@
 Reads probe failures from the run folder's probes/probe-results.json and the test summary from
 tests/summary.json (written by run_tests.py) by default. Incidents are read straight from the
 JSONL format, never through incident.py. Review Focus section lines: `- <package>: deep, numeric`.
+Rows a later event resolved are listed briefly, not counted; possibly stale ones stay marked (review_triage).
+Repeats of one message collapse into one item with a count, across locations too.
 """
 from __future__ import annotations
 
@@ -22,13 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import base  # noqa: E402
 import incident  # noqa: E402
 import planfile  # noqa: E402
+import review_triage as triage  # noqa: E402
 import sandbox  # noqa: E402
 import state  # noqa: E402
 from review_contract import check_interfaces, rel_to, review_focus  # noqa: E402
 
 CATEGORIES = ("deep", "numeric", "encoding", "protocol", "file", "state")
 CHARS_PER_TOKEN = 1.9  # 20k tokens ~ 38k chars
-RESOLVED = {"fixed", "resolved", "closed", "wontfix", "accepted"}
 PASS_STATUSES = {"pass", "passed", "ok"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "tests",
              "test", "build", "dist", ".pytest_cache"}
@@ -85,32 +87,87 @@ class Item:
     body: str
     file: str = ""
     line: int = 0
+    more: tuple = ()  # the other files of a merged incident, for the hot-spot excerpts
 
 
-def incident_items(entries: list[dict]) -> list[Item]:  # O(K) total
-    groups: dict[tuple[str, int], list[dict]] = {}
-    for e in entries:
+def _row_lines(rows: list[dict], limit: int = 3) -> list[str]:  # O(rows)
+    """One line per distinct (tags, message), with a count and who it repeats for."""
+    seen: dict[tuple[str, str], list[str]] = {}
+    for e in rows:
+        tags = "/".join(str(e[k]) for k in ("kind", "resolution", "confidence", "agent") if e.get(k))
+        msg, who = triage.message(e)
+        seen.setdefault((tags, msg), []).append(who)
+    out = []
+    for (tags, msg), whos in list(seen.items())[:limit]:
+        names = list(dict.fromkeys(w for w in whos if w))
+        who = ", ".join(names[:4]) + (", ..." if len(names) > 4 else "")
+        count = f"x{len(whos)}" if len(whos) > 1 else ""
+        tail = ": ".join(t for t in (count, who) if t)
+        out.append(f"- [{tags}] {msg[:200]}" + (f" ({tail})" if tail else ""))
+    if len(seen) > limit:
+        out.append(f"- (+{len(seen) - limit} more distinct entries)")
+    return out
+
+
+def _cluster_item(locs: list[tuple], stale: str) -> Item:
+    """One item for every location that carries the same open message(s)."""
+    locs.sort(key=lambda x: (x[0], x[1]))
+    file, line = locs[0][0], locs[0][1]
+    rows = [e for loc in locs for e in loc[2]]
+    live = [e for loc in locs for e in loc[3]]
+    low = any(str(e.get("confidence", "")).lower() == "low" for e in rows)
+    repeated = len(rows) >= 2
+    why = [w for w, on in (("repeated", repeated), ("unresolved", bool(live)), ("low confidence", low)) if on]
+    why += [f"possibly stale: {stale}"] if stale else []
+    tier = 0 if repeated else 1 if live else 2
+    body = _row_lines(live or rows)
+    if len(locs) > 1:
+        more = ", ".join(f"{f}:{ln}" for f, ln, *_ in locs[1:9])
+        body.append(f"- same message also at: {more}" + (f" (+{len(locs) - 9} more)" if len(locs) > 9 else ""))
+    if stale:
+        body.append("- Possibly stale: check it against the code before you report it.")
+    where = f"{file}:{line}" + (f" (+{len(locs) - 1} more location(s))" if len(locs) > 1 else "")
+    return Item("incidents", (5 if stale else 1, tier, -len(rows), file, line),
+                f"{where}  ({', '.join(why)}; {len(rows)} entr{'y' if len(rows) == 1 else 'ies'})",
+                "\n".join(body), file, line, tuple(dict.fromkeys(f for f, *_ in locs[1:] if f != file)))
+
+
+def incident_items(entries: list[dict], notes: list[str] | None = None) -> list[Item]:  # O(K) total
+    """Open incidents grouped by file:line, then locations with the same open message(s) merged into one item.
+    `notes` is review_triage.classify(entries): rows it resolved count as resolved here."""
+    notes = notes if notes is not None else triage.classify(entries)
+    groups: dict[tuple[str, int], list[tuple[dict, str]]] = {}
+    for e, n in zip(entries, notes):
         if e.get("kind") != "verified":
-            groups.setdefault((e["file"], e["line"]), []).append(e)
-    items: list[Item] = []
-    for (file, line), es in groups.items():
-        repeated = len(es) >= 2
-        unresolved = any(str(e.get("resolution", "")).lower() not in RESOLVED for e in es)
-        low = any(str(e.get("confidence", "")).lower() == "low" for e in es)
-        if not unresolved and not low:
+            groups.setdefault((e["file"], e["line"]), []).append((e, n))
+    clusters: dict[tuple, list[tuple]] = {}
+    for (file, line), pairs in groups.items():
+        live = [(e, n) for e, n in pairs if triage.is_unresolved(e) and not n.startswith("resolved")]
+        low = any(str(e.get("confidence", "")).lower() == "low" for e, _ in pairs)
+        if not live and not low:
             continue
-        why = [w for w, on in (("repeated", repeated), ("unresolved", unresolved), ("low confidence", low)) if on]
-        tier = 0 if repeated else 1 if unresolved else 2
-        lines = []
-        for e in es[:3]:
-            tags = "/".join(str(e[k]) for k in ("kind", "resolution", "confidence", "agent") if e.get(k))
-            lines.append(f"- [{tags}] {str(e.get('context', ''))[:200]}")
-        if len(es) > 3:
-            lines.append(f"- (+{len(es) - 3} more entries at this location)")
-        items.append(Item("incidents", (1, tier, -len(es), file, line),
-                          f"{file}:{line}  ({', '.join(why)}; {len(es)} entr{'y' if len(es) == 1 else 'ies'})",
-                          "\n".join(lines), file, line))
-    return items
+        stale_notes = {n[len("stale: "):] for _, n in live if n.startswith("stale")}
+        first = sorted(stale_notes)[:1] + ([f"+{len(stale_notes) - 1} more"] if len(stale_notes) > 1 else [])
+        stale = "; ".join(first) if live and all(n.startswith("stale") for _, n in live) else ""
+        sig = tuple(sorted({(triage.message(e)[0], file if e.get("agent") == "run_tests" else "")
+                            for e, _ in (live or pairs)}))  # a generic test message never merges across files
+        clusters.setdefault((sig, stale), []).append((file, line, [e for e, _ in pairs], [e for e, _ in live]))
+    return [_cluster_item(locs, stale) for (_sig, stale), locs in clusters.items()]
+
+
+def resolved_lines(entries: list[dict], notes: list[str], limit: int = 12) -> list[str]:  # O(K)
+    """Brief lines for the open rows a later event resolved, collapsed by message and reason."""
+    seen: dict[tuple[str, str], list[str]] = {}
+    for e, n in zip(entries, notes):
+        if n.startswith("resolved"):
+            seen.setdefault((triage.message(e)[0], n[len("resolved: "):]), []).append(f"{e['file']}:{e['line']}")
+    out = []
+    for (msg, why), locs in list(seen.items())[:limit]:
+        where = locs[0] + (f" (+{len(locs) - 1} more)" if len(locs) > 1 else "")
+        out.append(f"- {where}  {msg[:120]} - resolved: {why}")
+    if len(seen) > limit:
+        out.append(f"- (+{len(seen) - limit} more resolved messages)")
+    return out
 
 
 def read_probe_failures(probes: Path) -> list[Item]:  # O(R) total
@@ -122,15 +179,17 @@ def read_probe_failures(probes: Path) -> list[Item]:  # O(R) total
     except ValueError:
         return []
     results = data.get("results", []) if isinstance(data, dict) else data
-    items: list[Item] = []
+    groups: dict[tuple, int] = {}  # identical failures collapse into one item with a count
     for r in results if isinstance(results, list) else []:
         if not isinstance(r, dict) or str(r.get("status", "pass")).lower() in PASS_STATUSES:
             continue
-        file = str(r.get("file", "")).replace("\\", "/")
-        line = int(r.get("line") or 0)
-        detail = str(r.get("detail") or r.get("message") or r.get("probe") or "")[:200]
-        items.append(Item("probes", (3, str(r.get("category", "")), file, line),
-                          f"probe {r.get('category', '?')} {r.get('status')}: {file}:{line}",
+        key = (str(r.get("category", "?")), str(r.get("status")), str(r.get("file", "")).replace("\\", "/"),
+               int(r.get("line") or 0), str(r.get("detail") or r.get("message") or r.get("probe") or "")[:200])
+        groups[key] = groups.get(key, 0) + 1
+    items: list[Item] = []
+    for (cat, status, file, line, detail), n in groups.items():
+        items.append(Item("probes", (3, cat, file, line),
+                          f"probe {cat} {status}: {file}:{line}" + (f"  (x{n})" if n > 1 else ""),
                           f"- {detail}" if detail else "", file, line))
     return items
 
@@ -189,7 +248,8 @@ def uncovered_items(plan: planfile.Plan, root: Path, entries: list[dict]) -> lis
             file, line = _largest_module(root, pkg)
             items.append(Item("uncovered", (4, pkg, cat),
                               f"package {pkg}: no `verified` entry for category `{cat}`",
-                              "- Unverified: judge from the excerpt or list it as a finding.", file, line))
+                              "- Unverified: nothing marked this category verified. Read the package and check it "
+                              "yourself, or list it as a finding.", file, line))
     return items
 
 
@@ -313,19 +373,28 @@ def _summary_in(sl: Path) -> Path:  # O(1) tests/summary.json, else an old archi
     return old if not new.exists() and not (new.parent / "latest").exists() and old.exists() else new
 
 
-def read_test_summary(path: Path) -> tuple[str, int]:  # O(file size) total
+def load_summary(path: Path) -> tuple[str, dict | None]:  # O(file size) total
+    """(state, data): state is running, missing, unreadable or ok; data only when ok."""
     try:  # the pointer names the newest background run; its summary may not be written yet
         ptr = json.loads((path.parent / "latest" if path.name == "summary.json" else path.with_name("test-summary.latest")).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         ptr = None
     if isinstance(ptr, dict) and isinstance(ptr.get("summary"), str) and not Path(ptr["summary"]).exists():
-        return "- tests: running (newest run not finished; results reach the fixers)", 0
+        return "running", None
     if not path.is_file():
-        return "- no test summary recorded", 0
+        return "missing", None
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
-        return "- test summary unreadable", 0
+        return "unreadable", None
+    return ("ok", d) if isinstance(d, dict) else ("unreadable", None)
+
+
+def read_test_summary(path: Path) -> tuple[str, int]:  # O(file size) total
+    st, d = load_summary(path)
+    if d is None:
+        return {"running": "- tests: running (newest run not finished; results reach the fixers)",
+                "missing": "- no test summary recorded"}.get(st, "- test summary unreadable"), 0
     failed = d.get("failures") or d.get("failed_tests") or []
     skipped = d.get("skipped_tests") or []
     nfail = int(d["failed"]) if isinstance(d.get("failed"), int) else len(failed)
@@ -357,30 +426,43 @@ def cap_text(s: str, limit: int, note: str = "(truncated)") -> str:  # O(len(s))
     return s[: max(0, limit - len(note) - 1)].rstrip() + "\n" + note
 
 
-def _collect(plan: planfile.Plan, root: Path, log: Path, probes: Path):  # O(S*B + I*B + I log I) + 1 python subprocess
-    """All ranked items, the contract mismatches that produced some, and how many signatures were checked."""
+def _collect(plan: planfile.Plan, root: Path, log: Path, probes: Path,  # O(S*B + I*B + I log I) + 1 python subprocess
+             facts: triage.Facts | None = None):
+    """All ranked items, the contract mismatches that produced some, how many signatures were checked, and the
+    brief lines for incidents a later event resolved."""
     entries = read_incidents(log)
-    items = incident_items(entries) + read_probe_failures(probes) + uncovered_items(plan, root, entries)
+    notes = triage.classify(entries, facts)
+    items = incident_items(entries, notes) + read_probe_failures(probes) + uncovered_items(plan, root, entries)
     mismatches, n_checked = check_interfaces(plan, root, None)
     for m in mismatches:
         items.append(Item("contract", (2, m.file, m.line, m.msg), f"{m.file}:{m.line}  part1 {m.task}",
                           f"- {m.msg}", m.file, m.line))
     items.sort(key=lambda i: i.rank)
-    return items, mismatches, n_checked
+    return items, mismatches, n_checked, resolved_lines(entries, notes)
 
 
-def _head(plan: planfile.Plan, fast: bool, n_open: int, counts: dict, nfail: int) -> list[str]:
-    verdict = ("Nothing is open: no open incidents, probe failures, unverified categories, contract mismatches or "
-               "failing tests. Reply with a short APPROVED (about 10 s)." if fast else
-               f"Open items: {n_open} (incidents {counts['incidents']}, probe failures {counts['probes']}, "
-               f"unverified categories {counts['uncovered']}, contract mismatches {counts['contract']}, "
-               f"failing tests {nfail}). Excerpts are +-12 lines.")
+def _head(plan: planfile.Plan, fast: bool, n_open: int, counts: dict, nfail: int, n_stale: int,
+          changed: list[str], limit: int = 6000) -> list[str]:
+    verdict = ("Nothing is open in the logs: no open incidents, probe failures, unverified categories, contract "
+               "mismatches or failing tests. Read the changed files; if they hold up, reply `Verdict: APPROVED`."
+               if fast else
+               f"Open items: {n_open} (incidents {counts['incidents']}, {n_stale} of them possibly stale; probe "
+               f"failures {counts['probes']}, unverified categories {counts['uncovered']}, contract mismatches "
+               f"{counts['contract']}, failing tests {nfail}). Excerpts are +-12 lines.")
+    shown = changed[:150]
+    files = [f"- {f}" for f in shown] or ["- none found (no checkpoints and no diff against the base)"]
+    files += [f"- (+{len(changed) - len(shown)} more)"] if len(changed) > len(shown) else []
+    files = cap_text("\n".join(files), max(500, limit), f"- (list cut at the size cap; {len(changed)} files)")
     return [
         f"# Review packet: {'FAST PATH' if fast else 'REVIEW REQUIRED'}",
         f"plan: {plan.path.name}",
-        "Answer in one turn, no tools: a verdict, then findings as `file:line - problem - fix`. "
-        "Anything marked unverified is judged from its excerpt or listed as a finding.",
+        "This packet is the starting map, not the boundary: read the changed files below and every file an item "
+        "names, check each claim against the code, and hunt for what the logs do not show. Findings as "
+        "`file:line - problem - fix - tier N`.",
         verdict,
+        "",
+        "## Changed files (read these)",
+        files,
         "",
     ]
 
@@ -425,8 +507,10 @@ def cmd_packet(a: argparse.Namespace) -> int:  # O(S*B + I*B + I log I) + git/py
     tests = Path(a.tests) if a.tests else _summary_in(sl)
     cap = int(a.max_tokens * CHARS_PER_TOKEN)
 
-    items, mismatches, n_checked = _collect(plan, root, log, probes)
+    summary = load_summary(tests)[1]
+    items, mismatches, n_checked, resolved = _collect(plan, root, log, probes, triage.load_facts(root, sl, summary))
     counts = {s: sum(1 for i in items if i.section == s) for s in ("incidents", "probes", "uncovered", "contract")}
+    n_stale = sum(1 for i in items if i.section == "incidents" and i.rank[0] == 5)
     tests_text, nfail = read_test_summary(tests)
     n_open = sum(counts.values()) + (1 if nfail else 0)
     fast = n_open == 0
@@ -437,25 +521,30 @@ def cmd_packet(a: argparse.Namespace) -> int:  # O(S*B + I*B + I log I) + git/py
     focus = cap_text(review_focus(plan) or "(plan has no Review Focus section)", 3000)
     diff = cap_text(git_diff_stat(root, a.base), 2000)
     hot: list[str] = []  # hot-spot files: those the ranked items point at, in rank order
-    for it in items:
-        rel = rel_to(root, root / it.file) if it.file else None
-        if rel and rel not in hot:
+    for f in (f for it in items for f in (it.file, *it.more) if f):
+        rel = rel_to(root, root / f)
+        if rel not in hot:
             hot.append(rel)
     excerpts = cap_text(source_excerpts(root, a.base, hot), max(2000, cap // 3))
 
-    head = _head(plan, fast, n_open, counts, nfail)
+    git_ok = (root / ".git").exists()
+    head = _head(plan, fast, n_open, counts, nfail, n_stale,
+                 triage.changed_files(root, sl, _base_ref(root, a.base) if git_ok else None), cap // 8)
+    resolved_text = (["Resolved by a later event (not counted; spot-check any you doubt):", *resolved, ""]
+                     if resolved else [])
     tail = sandbox_section(root, sl) + ["## 4. Test summary", tests_text, "",
             "## 5. Cross-package seams (calls from one package into another)", seam_text, "",
             "## 6. Diff stat", "```\n" + diff + "\n```", "",
             "## 7. Review Focus", focus, "",
             "## 8. Source excerpts (changed hunks of the hot-spot files)", excerpts, ""]
     sec_titles = {
-        "incidents": "## 1. Open incidents (repeated file:line first, then unresolved, then low confidence)",
+        "incidents": "## 1. Open incidents (repeated file:line first, then unresolved, then low confidence, "
+                     "possibly stale last)",
         "probes": "## 2. Probe results: failures still open and unverified categories",
         "contract": f"## 3. Contract check: real signatures vs the plan's Produces ({n_checked} checked, "
                     f"{len(mismatches)} mismatch(es))",
     }
-    fixed_len = len("\n".join(head + tail)) + 400 + sum(len(t) + 40 for t in sec_titles.values())
+    fixed_len = len("\n".join(head + tail + resolved_text)) + 400 + sum(len(t) + 40 for t in sec_titles.values())
     chosen, omitted = _choose(root, items, cap - fixed_len)
     parts = list(head)
     for sec in ("incidents", "probes", "contract"):
@@ -465,6 +554,7 @@ def cmd_packet(a: argparse.Namespace) -> int:  # O(S*B + I*B + I log I) + git/py
         om = omitted[sec] + (omitted["uncovered"] if sec == "probes" else 0)
         if om:
             parts.append(f"- ({om} lower-ranked item(s) omitted to stay within the size cap)\n")
+        parts.extend(resolved_text if sec == "incidents" else [])
     parts.extend(tail)
     text = cap_text("\n".join(parts), cap, "(packet truncated at the size cap)")
     out.parent.mkdir(parents=True, exist_ok=True)
