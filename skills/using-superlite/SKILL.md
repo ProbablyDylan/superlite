@@ -5,7 +5,7 @@ description: Use when starting any conversation - explains superlite, how to siz
 
 Superlite: parallel work, short reports.
 
-**Start menu.** First message, no mode named, not trivial: `superlite-cli suggest_flow`, then `/superlite:start`.
+**Start menu.** First message asks to build, change or fix something, names no mode, not trivial: `superlite-cli suggest_flow`, then `/superlite:start`. A question or chat gets a plain answer.
 
 **Size the request first.**
 - Trivial: just do it (human orchestrator: after a yes in chat).

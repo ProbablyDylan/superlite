@@ -195,7 +195,8 @@ def main(argv=None):  # O(entries)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status", help="the live topic and every parked one, one plain line each")
     sub.add_parser("brief", help="one line for session start, empty when nothing is parked")
-    a = ap.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    a = ap.parse_args(argv or ["status"])  # bare: status, not a usage error
     sl = state.run_dir(Path.cwd())
     runs = parked(sl)
     if a.cmd == "brief":

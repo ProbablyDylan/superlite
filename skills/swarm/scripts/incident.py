@@ -14,6 +14,10 @@ import state  # noqa: E402
 DEFAULT_LOG = f"{state.DIR_NAME}/incidents.jsonl"
 KINDS = ("test-failure", "exception", "workaround", "spec-ambiguity",
          "assumption", "flaky", "perf", "unsure", "verified")
+# Words agents reach for that mean a known kind; anything else is still refused with the list.
+KIND_ALIASES = {"bug": "exception", "error": "exception", "crash": "exception", "failure": "test-failure",
+                "failing-test": "test-failure", "fixed": "verified", "fix": "verified", "resolved": "verified",
+                "hack": "workaround", "slow": "perf", "question": "unsure", "ambiguity": "spec-ambiguity"}
 CONFIDENCE = ("low", "medium", "high")
 MAX_CONTEXT = 200
 
@@ -52,6 +56,7 @@ def make_entry(file, line, context, agent=None, kind=None, resolution=None,  # O
     """One validated log entry; ValueError on bad input. date defaults to today, module to the file's parent dir."""
     if line < 0:
         raise ValueError("line must be >= 0")
+    kind = KIND_ALIASES.get(kind.lower(), kind.lower()) if isinstance(kind, str) else kind
     if kind is not None and kind not in KINDS:
         raise ValueError(f"kind must be one of: {', '.join(KINDS)}")
     if confidence is not None and confidence not in CONFIDENCE:

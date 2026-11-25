@@ -29,6 +29,8 @@ if [ -z "$tool" ]; then
   exit 2
 fi
 shift
+# /superlite:status is a skill; on the command line `status` means the orchestrator's state.
+if [ "$tool" = status ]; then tool=orchestrator; set -- status "$@"; fi
 
 for dir in "$here" "$here/../probes"; do
   if [ -f "$dir/$tool.sh" ]; then exec bash "$dir/$tool.sh" "$@"; fi
