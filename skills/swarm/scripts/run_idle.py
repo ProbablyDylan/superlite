@@ -70,6 +70,9 @@ def idle_since(sl: Path, now: float | None = None) -> float | None:
 
 
 def close_if_idle(root: Path, now: float | None = None) -> str:
+    import guard
+    if not guard.light():  # strict keeps a run on until finish
+        return ""
     sl = state.run_dir(root)
     last = idle_since(sl, now)
     if last is None:

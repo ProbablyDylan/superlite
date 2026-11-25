@@ -63,6 +63,13 @@ fi
 record_reply
 compact_nudge
 
+# Guard light: a run nobody finished stops counting as on once it sat idle for hours (the user often keeps one session
+# open for days, so session start alone would rarely see it). One Python start, only while a run is on.
+idle_note=""
+if [ "$active" = 1 ] && [ "$light" = 1 ] && [ -f "$root/skills/swarm/scripts/run_idle.py" ]; then
+  idle_note="$("$py" "$root/skills/swarm/scripts/run_idle.py" "$proj" 2>/dev/null)" || idle_note=""
+fi
+
 # The HUD and the cost line read the folder the host names (proj0), not the run found above it.
 hud=""
 hud_script="$root/skills/swarm/scripts/session_hud.py"
@@ -74,6 +81,7 @@ if [ "${SUPERLITE_NO_COST_REPORT:-}" != "1" ] && [ -d "$proj0/.superlite" ]; the
   cost="$("$py" "$root/skills/swarm/scripts/cost.py" line "$proj0/.superlite" 2>/dev/null)" || cost=""
 fi
 lines="$hud"
+if [ -n "$idle_note" ]; then lines="${lines:+$lines$'\n'}$idle_note"; fi
 if [ -n "$cost" ]; then lines="${lines:+$lines$'\n'}$cost"; fi
 
 # Same text as the last prompt of this session: say nothing.

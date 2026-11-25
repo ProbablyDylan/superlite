@@ -221,14 +221,6 @@ up_to_run "$proj"; proj="$UP"
 if [ -n "$in_cwd" ]; then up_to_run "$in_cwd"; [ -f "$UP/.superlite/orchestrator.json" ] && proj="$UP"; fi
 sd="$proj/.superlite"
 
-# A build run is on while a run marker is newer than .superlite/run.finished (written by superlite-cli finish) and
-# .superlite/run.idle (written by run_idle.py at session start once the run sat idle for hours; nobody finished it).
-# The markers stay after a run for its report; the next run rewrites them, which makes them newer again.
-active=0
-for mk in "$sd/stable.json" "$sd/prime.md" "$sd/pool.json" "$sd/dispatch.json"; do
-  [ -f "$mk" ] && [ "$mk" -nt "$sd/run.finished" ] && [ "$mk" -nt "$sd/run.idle" ] && { active=1; break; }
-done
-
 # Guard mode: SUPERLITE_GUARD, else "guard" in preferences.json in the superlite home; strict unless it says light.
 # light: the coordinator may write project code, a closed human gate holds only superlite's own build agents and
 # commands, and peer plugins are not suspended. Protected state files stay in every mode; the run-state guards
@@ -252,4 +244,14 @@ if [ -z "$guard_mode" ]; then
   fi
 fi
 [ "$guard_mode" = light ] && light=1
+
+# A build run is on while a run marker is newer than .superlite/run.finished (written by superlite-cli finish) and, under
+# guard light, .superlite/run.idle (written by run_idle.py at session start or on a prompt once the run sat idle for
+# hours; nobody finished it). The markers stay after a run for its report; the next run (or dispatch) rewrites them.
+idle_mark="$sd/run.finished"
+[ "$light" = 1 ] && idle_mark="$sd/run.idle"
+active=0
+for mk in "$sd/stable.json" "$sd/prime.md" "$sd/pool.json" "$sd/dispatch.json"; do
+  [ -f "$mk" ] && [ "$mk" -nt "$sd/run.finished" ] && [ "$mk" -nt "$idle_mark" ] && { active=1; break; }
+done
 true

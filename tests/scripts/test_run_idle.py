@@ -2,10 +2,14 @@
 counts this run's working time and cost only."""
 import json
 import os
+import subprocess
 import sys
 import time
 
-from test_block_coordinator_edits import run as pre_tool
+import pytest
+
+from test_block_coordinator_edits import BASH, run as pre_tool
+from test_human_gate import reply
 from test_plan_tools import SCRIPTS
 from test_session_run_state import _start, hub, reg, row  # noqa: F401  (hub: fixture)
 
@@ -16,6 +20,11 @@ import run_idle  # noqa: E402
 import suggest_flow  # noqa: E402
 
 H = 3600
+
+
+@pytest.fixture(autouse=True)
+def light(monkeypatch):  # the idle close is a guard-light rule; strict keeps a run on until finish
+    monkeypatch.setenv("SUPERLITE_GUARD", "light")
 
 
 def age(p, hours):
@@ -53,14 +62,28 @@ def test_finished_run_is_not_reclosed(tmp_path):
     assert run_idle.close_if_idle(tmp_path) == "" and not (sl / "run.idle").exists()
 
 
-def test_pre_tool_hook_treats_an_idle_closed_run_as_over(tmp_path, monkeypatch):
+def test_strict_keeps_a_run_on_until_finish(tmp_path, monkeypatch):
     monkeypatch.setenv("SUPERLITE_GUARD", "strict")
     sl = run_dir(tmp_path, hours=8)
-    age(sl / "progress.md", 8)
     edit = {"file_path": str(tmp_path / "src" / "app.py")}
+    assert run_idle.close_if_idle(tmp_path) == "" and not (sl / "run.idle").exists()
+    (sl / "run.idle").write_text("x")  # left from a light session
     assert pre_tool(tmp_path, "Edit", edit).returncode == 2  # strict, live run: the coordinator may not edit code
-    run_idle.close_if_idle(tmp_path)
-    assert pre_tool(tmp_path, "Edit", edit).returncode == 0
+    assert preamble_active(tmp_path, "strict") == "1" and preamble_active(tmp_path, "light") == "0"
+
+
+def preamble_active(proj, mode):
+    hook = SCRIPTS.parents[2] / "hooks" / "_preamble"
+    r = subprocess.run([BASH, "-c", f'. "{hook}"; printf %s "$active"'], input='{"tool_name":"Bash"}', capture_output=True,
+                       text=True, env={**os.environ, "CLAUDE_PROJECT_DIR": str(proj), "SUPERLITE_GUARD": mode})
+    return r.stdout
+
+
+def test_a_prompt_after_a_long_absence_closes_the_run(tmp_path):
+    sl = run_dir(tmp_path, hours=8)
+    r = reply(tmp_path, "back again, carry on")
+    assert (sl / "run.idle").is_file() and "idle since" in r.stdout
+    assert "idle since" not in reply(tmp_path, "and again").stdout
 
 
 def test_session_start_closes_an_idle_run_and_reports_existing_code(hub):  # noqa: F811
