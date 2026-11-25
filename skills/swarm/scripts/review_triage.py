@@ -6,12 +6,15 @@ Resolved (left out of the open list; the packet lists them briefly so the review
   - a later `verified` row (log order: the log is append-only, `incident resolve` rewrites in place) for the same
     file from the same writer: run_tests for a test failure (all the file's tests pass) or probe_run (the same
     probe category); for a seam mismatch, a later `verified: seam Ta↔Tb` row for the same seam;
-  - a run_tests failure the newest finished test summary provably re-ran green: tests ran (passed > 0, no hang,
-    every failure a `file::test` line), mode `full` or the file in `selected`, and the test not among its failures;
-  - a checkpoint row for task Tn when Tn's newest checkpoint commit is later than the row's date and time.
-Possibly stale (kept and counted, marked): a checkpoint row whose order against Tn's checkpoint cannot be told
-(no date on the row, no commit time, or the same second), a later `verified` row from another agent for the same
-file, or a row whose file no longer exists.
+  - a run_tests failure the newest finished test summary provably re-ran green: the run started (its run_id time)
+    after the row's date and time, tests ran (passed > 0, no hang), nothing failed (failed 0, no failures, so no
+    crash and no -x stop), nothing skipped without a name and the test not skipped, mode `full` or the file in
+    `selected`. The summary has no per-test pass list, so this is as close as it gets; when unsure, it stays open;
+  - a failed-checkpoint row (`...; nothing saved`) for task Tn when Tn's newest checkpoint commit is later than the
+    row's date and time. Out-of-scope notes (`change outside Owns left out...`) are never resolved by a checkpoint.
+Possibly stale (kept and counted, marked): a failed-checkpoint row whose order against Tn's checkpoint cannot be told
+(no date on the row, no commit time, or the same second), a later `verified` row from the same agent for the same
+file (run_tests excepted: its rows prove only tests pass), or a row whose file no longer exists.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ _TASK = re.compile(r"^(T\d+\w*):\s+")
 _PROBE = re.compile(r"^probe (\w+) (\S+) (.*?)(?: \(size .*\))?(?:; test \S+)?$")
 _TEST = re.compile(r"^(\S+?): (.+)$")
 _SEAM = re.compile(r"^(?:verified: )?(seam [^\s:]+)")
+_RUN_ID = re.compile(r"^(\d{8}T\d{6})-")  # run_tests.new_run_id: local start time, pid, random
 
 
 @dataclass
@@ -77,22 +81,44 @@ def _logged_at(e: dict) -> float | None:  # local date + time of the row; None w
         return None
 
 
-def _summary_passes(e: dict, s: dict | None) -> bool:
-    """The newest test run covered this failure's file and the test is not failing there."""
-    if not s or e.get("agent") != "run_tests" or e.get("kind") != "test-failure":
-        return False
+def _started_at(s: dict) -> float | None:  # the summary's run start from its run_id; None when unknown
+    m = _RUN_ID.match(str(s.get("run_id") or ""))
+    try:
+        return time.mktime(time.strptime(m[1], "%Y%m%dT%H%M%S")) if m else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def _all_green(s: dict) -> bool:
+    """Tests ran and nothing failed, hung, crashed (`-::` lines) or was skipped without a name."""
     fails = [str(f) for f in s.get("failures") or []]
-    if not int(s.get("passed") or 0) or s.get("suspect_hang") or any("::" not in f for f in fails):
-        return False  # a crashed, hung or empty run proves nothing
-    covered = s.get("mode") == "full" or e["file"] in (s.get("selected") or [])
+    try:
+        passed, failed = int(s.get("passed") or 0), int(s.get("failed") or 0)
+        unnamed = int(s.get("skipped") or 0) > len(s.get("skipped_tests") or [])
+    except (TypeError, ValueError):
+        return False
+    crashed = any(f.startswith("-::") or "::" not in f for f in fails)
+    return bool(passed and not failed and not fails and not crashed and not unnamed and not s.get("suspect_hang"))
+
+
+def _summary_passes(e: dict, s: dict | None) -> bool:
+    """The newest test run started after this failure, covered its file, and ran green with the test not skipped."""
+    if not s or e.get("agent") != "run_tests" or e.get("kind") != "test-failure" or not _all_green(s):
+        return False
+    started, logged = _started_at(s), _logged_at(e)
+    if started is None or logged is None or started <= logged:
+        return False  # an older (or same-second) run cannot prove a newer failure fixed
     name = message(e)[1]
-    failing = any(f.startswith(f"{e['file']}::{name}") for f in fails)
-    return bool(covered and name and not failing)
+    test = f"{e['file']}::{name}"
+    skipped = any(str(t).startswith(test) for t in s.get("skipped_tests") or [])
+    covered = s.get("mode") == "full" or e["file"] in (s.get("selected") or [])
+    return bool(covered and name and not skipped)
 
 
 def _checkpoint_note(e: dict, facts: Facts) -> str:
     task = message(e)[1]
-    if e.get("agent") != "checkpoint" or task not in facts.checkpoints:
+    failed = str(e.get("context", "")).rstrip().endswith("nothing saved")  # not an out-of-scope note
+    if e.get("agent") != "checkpoint" or not failed or task not in facts.checkpoints:
         return ""
     saved, logged = facts.checkpoints[task], _logged_at(e)
     if saved is None or logged is None or saved == logged:
@@ -104,14 +130,14 @@ def classify(entries: list[dict], facts: Facts | None = None) -> list[str]:  # O
     """One note per row: "" (open, or not an open incident), "resolved: why" or "stale: why"."""
     facts = facts or Facts()
     same: dict[tuple, int] = {}
-    other: dict[str, tuple[int, str]] = {}
+    other: dict[tuple[str, str], int] = {}
     for i, e in enumerate(entries):
         m = _SEAM.match(str(e.get("context", ""))) if e.get("kind") == "verified" else None
         if m:
             same[("", "seam", m[1])] = i
         if e.get("kind") == "verified" and e.get("file"):
             same[(e["file"], *_writer(e))] = i
-            other[e["file"]] = (i, str(e.get("agent") or "an agent"))
+            other[(e["file"], str(e.get("agent") or ""))] = i
     notes = []
     for i, e in enumerate(entries):
         notes.append(_note(i, e, facts, same, other) if is_unresolved(e) else "")
@@ -131,9 +157,8 @@ def _note(i: int, e: dict, facts: Facts, same: dict, other: dict) -> str:
     note = _checkpoint_note(e, facts)
     if note:
         return note
-    j, who = other.get(e["file"], (-1, ""))
-    if j > i:
-        return f"stale: {who} logged `verified` for this file later"
+    if agent and agent != "run_tests" and other.get((e["file"], agent), -1) > i:  # same writer only
+        return f"stale: {agent} logged `verified` for this file later"
     f = e["file"]
     if f and f != "-" and not f.endswith("/") and not facts.exists(f):
         return "stale: the file no longer exists"

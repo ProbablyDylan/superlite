@@ -90,25 +90,65 @@ def test_probe_verified_resolves_only_its_category():
     assert len(got) == 1 and "possibly stale" in got[0].title  # another writer's verified: kept, marked
 
 
+T0 = 1_790_000_000.0
+
+
+def _run_id(epoch: float) -> str:  # run_tests.new_run_id's shape: local start time, pid, random
+    return time.strftime("%Y%m%dT%H%M%S", time.localtime(epoch)) + "-123-abcdef"
+
+
+def _fail(t=T0):
+    return row("tests/t.py", 5, "test_a: KeyError: 99", agent="run_tests", kind="test-failure", **_at(t))
+
+
+def _green(**kw) -> dict:  # a green full run that started a minute after the failure row
+    return {"mode": "full", "passed": 40, "failed": 0, "skipped": 0, "failures": [], "skipped_tests": [],
+            "run_id": _run_id(T0 + 60), **kw}
+
+
 def test_newest_full_run_resolves_test_failure():
-    fail = row("tests/t.py", 5, "test_a: KeyError: 99", agent="run_tests", kind="test-failure")
-    green = {"mode": "full", "passed": 40, "failures": []}
-    assert items([fail], tr.Facts(summary=green)) == []
-    red = {"mode": "full", "passed": 39, "failures": ["tests/t.py::test_a: KeyError: 99"]}
+    fail = _fail()
+    assert items([fail], tr.Facts(summary=_green())) == []
+    red = _green(passed=39, failed=1, failures=["tests/t.py::test_a: KeyError: 99"])
     assert len(items([fail], tr.Facts(summary=red))) == 1
-    other = {"mode": "affected", "passed": 3, "selected": ["tests/u.py"], "failures": []}
+    other = _green(mode="affected", passed=3, selected=["tests/u.py"])
     assert len(items([fail], tr.Facts(summary=other))) == 1  # did not re-run this file
-    mine = {"mode": "affected", "passed": 3, "selected": ["tests/t.py"], "failures": []}
+    mine = _green(mode="affected", passed=3, selected=["tests/t.py"])
     assert items([fail], tr.Facts(summary=mine)) == []
 
 
+def test_skipped_test_is_not_resolved():  # defect 1a: skipped is not green
+    s = _green(skipped=1, skipped_tests=["tests/t.py::test_a"])
+    assert len(items([_fail()], tr.Facts(summary=s))) == 1
+    unnamed = _green(skipped=2, skipped_tests=[])  # the non-JUnit path counts skips without names
+    assert len(items([_fail()], tr.Facts(summary=unnamed))) == 1
+
+
+def test_run_stopped_by_another_failure_is_not_resolved():  # defect 1b: -x / --maxfail never reached it
+    s = _green(failed=1, failures=["tests/g.py::test_g: boom"])
+    assert len(items([_fail()], tr.Facts(summary=s))) == 1
+
+
+def test_non_pytest_crash_is_not_resolved():  # defect 1c: run_tests writes `-::ctx` for a crash
+    for s in (_green(failures=["-::exit 139 (SIGSEGV): Segmentation fault"]),
+              _green(failures=["-::exit 139 (SIGSEGV): Segmentation fault"], failed=None)):
+        assert len(items([_fail()], tr.Facts(summary=s))) == 1, s
+
+
+def test_summary_older_than_the_failure_is_not_resolved():  # defect 1d: an older background run published late
+    assert len(items([_fail()], tr.Facts(summary=_green(run_id=_run_id(T0 - 60))))) == 1
+    assert len(items([_fail()], tr.Facts(summary=_green(run_id=_run_id(T0))))) == 1  # same second: order unknown
+    assert len(items([_fail()], tr.Facts(summary=_green(run_id="")))) == 1  # no start time
+    undated = row("tests/t.py", 5, "test_a: KeyError: 99", agent="run_tests", kind="test-failure")
+    assert len(items([undated], tr.Facts(summary=_green()))) == 1
+
+
 def test_crashed_hung_or_empty_run_resolves_nothing():
-    fail = row("tests/t.py", 5, "test_a: KeyError: 99", agent="run_tests", kind="test-failure")
-    for s in ({"mode": "full", "passed": 0, "failures": []},  # no tests collected
-              {"mode": "full", "passed": 0, "failures": ["pytest produced no results (killed)"]},
-              {"mode": "full", "passed": 5, "failures": ["hang: watcher killed pytest"]},
-              {"mode": "full", "passed": 5, "failures": [], "suspect_hang": True}):
-        assert len(items([fail], tr.Facts(summary=s))) == 1, s
+    for s in (_green(passed=0),  # no tests collected
+              _green(passed=0, failures=["pytest produced no results (killed)"]),
+              _green(passed=5, failures=["hang: watcher killed pytest"]),
+              _green(passed=5, suspect_hang=True)):
+        assert len(items([_fail()], tr.Facts(summary=s))) == 1, s
 
 
 def test_later_seam_verified_resolves_the_mismatch():
@@ -151,6 +191,21 @@ def test_checkpoint_order_unknown_is_possibly_stale_and_ranked_last():
     assert [i.file for i in got] == ["src/n.py", "src/m.py"]
     assert "possibly stale: T1 has a checkpoint" in got[1].title
     assert "check it against the code" in got[1].body
+
+
+def test_out_of_scope_note_is_not_resolved_by_its_own_checkpoint():  # defect 2
+    t = 1_790_000_000.0
+    left = row("vendor/", 0, "T1: change outside Owns left out of the checkpoint: 3 files under vendor/, first 3: "
+               "vendor/a, vendor/b, vendor/c", agent="checkpoint", resolution="noted", **_at(t))
+    for saved in (t + 60, t):
+        assert tr.classify([left], tr.Facts(checkpoints={"T1": saved})) == [""], saved
+
+
+def test_unrelated_writer_verified_does_not_mark_stale():  # defect 3
+    bug = row("src/a.py", 4, "T1: ValueError in parse", agent="T1")
+    assert tr.classify([bug, verified("src/a.py")])[0] == ""
+    mine = row("src/a.py", 4, "off-by-one in parse", agent="reviewer")
+    assert tr.classify([mine, verified("src/a.py", "reviewer", "parse ok")])[0].startswith("stale")
 
 
 def test_missing_file_is_possibly_stale():
