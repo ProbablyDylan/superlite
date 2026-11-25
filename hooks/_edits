@@ -395,25 +395,6 @@ elif [ -z "$hit" ]; then
   lower "$cmd"; lc="$LOWER"
   mentions=0
   [[ $lc == *human-replies.jsonl* || $lc == *orchestrator.json* || $lc == *.superlite/feature.json* ]] && mentions=1
-  # A mention names the file when it is a string literal ending in the name ('…/orchestrator.json', "human-replies.jsonl")
-  # or sits outside heredoc bodies (a script's argument). Prose or shell text inside a heredoc that edits source code
-  # (`[ -f .superlite/orchestrator.json ]` in a script being patched) is not a path the script writes.
-  if [ "$mentions" = 1 ]; then
-    re_lit="(orchestrator\.json|human-replies\.jsonl|\.superlite/feature\.json)[\"']"
-    if ! [[ $lc =~ $re_lit ]]; then
-      mentions=0; hskip=0; htag=""
-      re_hd="<<-?[[:space:]]*[\"']?([a-z_][a-z_0-9]*)"
-      while IFS= read -r hl; do
-        if [ "$hskip" = 1 ]; then
-          ht="${hl#"${hl%%[![:space:]]*}"}"; ht="${ht%"${ht##*[![:space:]]}"}"
-          [ "$ht" = "$htag" ] && hskip=0
-          continue
-        fi
-        [[ $hl == *human-replies.jsonl* || $hl == *orchestrator.json* || $hl == *.superlite/feature.json* ]] && { mentions=1; break; }
-        [[ $hl =~ $re_hd ]] && { htag="${BASH_REMATCH[1]}"; hskip=1; }
-      done <<< "$lc"
-    fi
-  fi
   # superlite-cli tools that start a build are denied until the plan is approved.
   re_cli='(superlite-cli|\$CLI|\$\{CLI\}|scripts/superlite-cli)"?[[:space:]]+(dispatch|assign|wave0|checkpoint|finish|build_prime)([^[:alnum:]_-]|$)'
   if [ "$gated" = 1 ] && [[ $cmd == *CLI* || $cmd == *superlite-cli* ]] && [[ $cmd =~ $re_cli ]]; then hit="superlite-cli ${BASH_REMATCH[2]}"; gatehit=1; fi
