@@ -24,9 +24,11 @@ the header of `history.py`), a per-project copy under `.superlite/`, and `stats.
 refreshes stats. Rows hold no code, prompts or file contents.
 
 ## Feed forward (deterministic: same plan plus same history gives the same result)
-- `predict.load_coef()` refits from history when at least 30 usable rows exist (`SUPERLITE_HISTORY_MIN`), else the
-  shipped `config/predictor.json`; the size band's `high_min` follows the refit's p90. An explicit `--coef` is never
-  replaced.
+- `predict.load_coef()` refits from history when at least 30 usable rows exist (`SUPERLITE_HISTORY_MIN`) and the refit
+  predicts them better than the shipped `config/predictor.json`, else it keeps the shipped file; the size band's
+  `high_min` follows the refit's p90. Usable run rows carry `timing: active`: task time is working time (an agent
+  waiting for its next message is not counted, and one tool run or model turn counts at most 5 min). Older rows
+  measured wall time and are skipped. An explicit `--coef` is never replaced.
 - `routing.json` `stats_gate`: a tier|band with at least `min_n` samples and a first-time pass rate below
   `min_first_time_pass` stays on Sonnet. `lint --stable` prints `stats: n=..` (and which tasks the gate moved) plus the
   predicted time and cost, marked history-backed or shipped.

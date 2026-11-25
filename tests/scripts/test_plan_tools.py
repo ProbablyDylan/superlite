@@ -336,11 +336,13 @@ def test_lint_placeholder_inside_code_fence_is_ignored(tmp_path):
     assert pt("lint", "--plan", p).returncode == 0
 
 
-def test_lint_size_band_errors_above_high_and_notes_below_low(tmp_path):
+def test_lint_size_band_notes_above_high_and_below_low(tmp_path):
     p = make_plan(tmp_path, [{"id": "T1", "time": 6.5}, {"id": "T2", "time": 0.5, "ctx": 30}])
     cp = pt("lint", "--plan", p)
-    assert cp.returncode == 1
-    assert "SIZE: T1 predicted 6.5 min > 6 max; split it along its components" in cp.out
+    assert cp.returncode == 0, cp.both
+    assert "NOTE: SIZE: T1 predicted 6.5 min > 6; consider splitting it along its components" in cp.out
+    assert "--max-task-min" not in cp.out and "NOTE: SIZE" in pt("lint", "--plan", p, "--max-task-min", "6.4").out
+    assert "NOTE: SIZE" not in pt("lint", "--plan", p, "--max-task-min", "7").out
     assert "NOTE: T2 predicted 0.5 min < 1.5; consider merging with a related task" in cp.out
     assert "mergeable" not in cp.out and "-min cap" not in cp.out
 
@@ -360,7 +362,6 @@ def test_lint_mutations(tmp_path):
         "T1 and T2 can run in parallel but both own src/x.py": lambda t: [x.update(owns="src/x.py") for x in t],
         "taskgraph: cycle in taskgraph": None,
         "T2 consumes f(a: int, b: int) but T1 produces f(a: int)": lambda t: t[1].update(consumes="f(a: int, b: int) -> int (T1)"),
-        "SIZE: T1 predicted": lambda t: t[0].update(time=9),
     }
     for expected, mutate in mutations.items():
         tasks = [dict(t) for t in clean]
@@ -603,8 +604,9 @@ def test_predictor_wins_over_stated_time_when_features_present(tmp_path):
 def test_lint_cap_uses_predicted_time_over_stated(tmp_path):
     # stated 7 min would break the 6-min band, but the features predict ~2.5
     p = make_plan(tmp_path, [dict(id="T1", time=7, **SKILL_BIG)])
-    assert pt("lint", "--plan", p).returncode == 0
-    assert pt("lint", "--plan", p, "--stated").returncode == 1
+    assert "NOTE: SIZE" not in pt("lint", "--plan", p).out
+    stated = pt("lint", "--plan", p, "--stated")
+    assert stated.returncode == 0 and "NOTE: SIZE: T1 predicted 7.0 min" in stated.out
 
 
 def test_lint_warns_without_features_or_time(tmp_path):

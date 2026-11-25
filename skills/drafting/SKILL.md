@@ -77,7 +77,7 @@ Here T1, T2 and T3 run in parallel; T2 and T3 build against T1's stubs, not its 
 1. **Interface stubs in Wave 0.** Wave 0 holds the skeleton (manifest, package inits, test config, shared error types) and interface stubs for every `Produces` another task consumes. `plan_tools.py stubs` generates them from your `Produces` lines, so write those lines exactly as `module.function(args) -> ret` or `Class.method(args) -> ret`, with a one-line contract in the task. The stub is the contract: implementers may not change a signature without a coordinator ruling.
 2. **A task waits only when its tests execute another task's code.** Consumers test against stubs with small fakes, never against the real producer. Integration tests that run both sides go in one small integration task per package at the end, so the consumers themselves don't wait. Consumers' own tests still run against the real producer later, through the seam check (`SUPERLITE_REAL=1`). A chain like parser → evaluator → workbook → CLI becomes one wave of four tasks against stubs, plus the integration task.
 2a. **Keep the chain short.** Lint fails with `CHAIN:` when the predicted critical path is over 2.5 times its longest task (with 3 or more tasks on it). Stub more interfaces, or add `Ruling: sequential - <why>` when the order really is forced, such as a migration before its users.
-3. **Keep every task inside the size band.** The only measure is predicted time, held in `config/predictor.json` as `size_band` (low_min 1.5, high_min 6.0). Over high_min lint fails `SIZE:`: split along components, for example a server+UI task becomes server (against the workbook stub) and UI (against the spec's JSON contract). Under low_min it prints `NOTE:` (consider merging with a related task in the same package) and never fails. `predict --refit` moves the band from measured task times. The 80k context ceiling stays.
+3. **Aim for tasks inside the size band.** The only measure is predicted time, held in `config/predictor.json` as `size_band` (low_min 1.5, high_min 6.0). Both ends are advice and never fail lint. Over high_min it prints `NOTE: SIZE:`: split along components where that is natural, for example a server+UI task becomes server (against the workbook stub) and UI (against the spec's JSON contract); otherwise leave it. Under low_min it prints `NOTE:` (consider merging with a related task in the same package). `predict --refit` moves the band from measured task times. The 80k context ceiling stays.
 4. **Slow tests stay out of the inner loop.** Mark them `Tests: slow`. Implementers run only fast tests during TDD, and slow suites run once in the background after the checkpoint.
 5. **Diagrams show the run.** The graph and schedule show the width and length of the run before anything runs, when a bad split is cheapest to fix.
 
@@ -171,8 +171,8 @@ Lint drops the edges that examples make removable (consumer not yet dispatched) 
 
 Read the lint output:
 - **`MISSED TARGET`** is a warning, not a failure. Consider re-splitting or stubbing the tasks on the named critical path. If the chain is inherently sequential, accept the plan and record `Ruling: <why>`.
-- **`NOTE:`** (under low_min) is advice only.
-- **Every other error must be fixed**: placeholders, Consumes/Produces mismatches, diagram parse errors, `SIZE:` (over high_min), `CHAIN:`, `KIND:`, `OPUS-TASK:`, spec sections with no task. First dispatch every task on the `DISPATCH NOW:` line, then patch the FIX tasks listed under `--stable` (edit or rewrite; keep dispatched blocks unchanged), rerun `lint --stable`, until only `MISSED TARGET` and `NOTE:` remain. Stable tasks need no rework: in delegated mode they dispatch now; with a human approver they wait for the yes (see "Who decides sets the mode").
+- **`NOTE:`** (including `NOTE: SIZE:`, either end of the size band) is advice only.
+- **Every other error must be fixed**: placeholders, Consumes/Produces mismatches, diagram parse errors, `CHAIN:`, `KIND:`, `OPUS-TASK:`, spec sections with no task. First dispatch every task on the `DISPATCH NOW:` line, then patch the FIX tasks listed under `--stable` (edit or rewrite; keep dispatched blocks unchanged), rerun `lint --stable`, until only `MISSED TARGET` and `NOTE:` remain. Stable tasks need no rework: in delegated mode they dispatch now; with a human approver they wait for the yes (see "Who decides sets the mode").
 - **Open it:** check `superlite-cli agent_specs status`. Only when `open_in_harness: on`, open every finished human-facing plan (review, feature, MVP, combined design+plan) using the open row in `using-superlite/references/<harness>-tools.md`. This applies in both orchestrator modes; an AI orchestrator opens it too and does not wait for the user. Never open the machine, `.proto.md` or integration plans.
 
 ## Self-review checklist
@@ -185,7 +185,7 @@ Run it yourself, not as a subagent. Fix in place, with no re-review.
 4. **Graph:** every edge is an execution dependency, with no cycles, and no two tasks that can run at once share a file.
 5. **Measurable fields:** every task has `Components`, `LOC owned`, `Tests`, `Model`.
 6. **Review Focus:** each package has an app type, categories and a `Probe entry`, and each task carries the cases for its files.
-7. **Limits:** the plan is at most 15k chars, no task is over the size band (`SIZE:`), and schedule and lint have run.
+7. **Limits:** the plan is at most 15k chars, and schedule and lint have run.
 
 ## Handoff
 

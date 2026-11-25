@@ -65,10 +65,11 @@ _HIST_CACHE: dict = {}
 
 def history_observations(rows: list) -> list:  # O(R)
     """Refit observations from history rows (aggregates only): loc, components, tests and duration.
-    Prototype rows (`phase: proto`) are not build work and never count."""
+    Prototype rows (`phase: proto`) are not build work and never count. Run rows count only with `timing: active`:
+    older ones measured wall time, which includes the hours an agent sat idle while the session stayed open."""
     obs = []
     for r in rows:
-        if r.get("phase") == "proto":
+        if r.get("phase") == "proto" or (r.get("source", "run") == "run" and r.get("timing") != "active"):
             continue
         loc, secs = r.get("loc"), r.get("duration_s")
         if isinstance(loc, (int, float)) and isinstance(secs, (int, float)) and secs > 0:
@@ -77,9 +78,22 @@ def history_observations(rows: list) -> list:  # O(R)
     return obs
 
 
+def _history_fit(obs: list, coef: dict) -> dict | None:  # O(N*M)
+    """The refit from history observations, or None: too few rows, or it predicts them no better than the shipped
+    coefficients (an outlier-heavy history can clamp every slope to zero and leave one large constant)."""
+    if len(obs) < int(os.environ.get("SUPERLITE_HISTORY_MIN", HISTORY_MIN_ROWS)):
+        return None
+    fitted, fit = refit(obs, load_models(), coef)
+    if fit["mae_after_min"] >= fit["mae_before_min"]:
+        return None
+    fitted["fit"]["source"] = "history"
+    return fitted
+
+
 def load_coef(path=None) -> dict:  # O(S) shipped; O(R) with enough history
     """Shipped coefficients; with no explicit path and at least HISTORY_MIN_ROWS usable history rows
-    (`$SUPERLITE_HOME/history.jsonl`) the refit from history instead (deterministic: same rows, same fit)."""
+    (`$SUPERLITE_HOME/history.jsonl`) the refit from history instead (deterministic: same rows, same fit), but only
+    when it predicts those rows better than the shipped coefficients do."""
     coef = _load_json(Path(path) if path else CONFIG_DIR / "predictor.json", "predictor file")
     if path:
         return coef
@@ -91,11 +105,7 @@ def load_coef(path=None) -> dict:  # O(S) shipped; O(R) with enough history
             return coef
         if key not in _HIST_CACHE:
             obs = history_observations(history.unique_rows([r for r in history.read_rows(hp) if r.get("phase") != "proto"]))
-            fitted = None
-            if len(obs) >= int(os.environ.get("SUPERLITE_HISTORY_MIN", HISTORY_MIN_ROWS)):
-                fitted, _ = refit(obs, load_models(), coef)
-                fitted["fit"]["source"] = "history"
-            _HIST_CACHE[key] = fitted
+            _HIST_CACHE[key] = _history_fit(obs, coef)
         return _HIST_CACHE[key] or coef
     except (OSError, ValueError, KeyError, TypeError, ArithmeticError, PredictError):
         return coef

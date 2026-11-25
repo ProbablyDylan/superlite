@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 from test_plan_tools import SCRIPTS, run
 from test_routing import mech_plan, mixed, plan, task
@@ -195,7 +197,8 @@ def _hist(home, rows):
 
 def _row(i, tier="haiku", ftp=True, loc=60, dur=90.0):
     return {"v": 1, "run": f"r{i}", "task": f"T{i}", "kind": "mechanical", "loc": loc, "components": 1, "tests": "fast", "tier": tier,
-            "model": tier, "duration_s": dur, "cost_usd": 0.02, "first_time_pass": ftp, "band": "mechanical/le60/fast", "source": "run"}
+            "model": tier, "duration_s": dur, "cost_usd": 0.02, "first_time_pass": ftp, "band": "mechanical/le60/fast", "source": "run",
+            "timing": "active"}
 
 
 def test_finish_records_run_and_reports_predicted_vs_actual(tmp_path, monkeypatch):
@@ -381,3 +384,35 @@ def test_cursor_role_transcript_estimates_output_tokens(tmp_path):
     }) + "\n", encoding="utf-8")
     segs = metrics.transcript_segments(tr, [])
     assert segs and segs[0]["tok"]["output"] >= 10
+
+
+def _line(kind, secs, content, **extra):
+    stamp = (datetime(2026, 10, 18, 9, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=secs)).isoformat().replace("+00:00", "Z")
+    msg = {"role": kind, "content": content}
+    if kind == "assistant":
+        msg.update(id=extra.pop("mid"), model=SONNET, usage={"input_tokens": 10, "output_tokens": 5})
+    return {"type": kind, "timestamp": stamp, "message": msg, **extra}
+
+
+def test_task_time_skips_idle_waits_and_caps_one_gap(tmp_path):
+    """Working time: the wait for the task message (plan approval while the session sat open) and for a follow-up
+    are not counted; one tool run counts at most GAP_CAP_S."""
+    sys.path.insert(0, str(SCRIPTS))
+    import metrics
+    tool = [{"type": "tool_use", "id": "tu1", "name": "Bash", "input": {}}]
+    result = [{"type": "tool_result", "tool_use_id": "tu1", "content": "ok"}]
+    lines = [
+        _line("user", 0, "Read the prime"), _line("assistant", 20, "READY", mid="m0"),
+        _line("user", 3 * 3600, "Task T1: build it"),            # 3 h idle: never counted
+        _line("assistant", 3 * 3600 + 30, tool, mid="m1"),         # 30 s model turn
+        _line("user", 3 * 3600 + 30 + 1800, result),               # 30 min tool wait: capped
+        _line("assistant", 3 * 3600 + 1860, "Status: DONE", mid="m2"),  # 30 s
+        _line("user", 5 * 3600, "T1: also fix the typo"),          # 2 h idle, same task: never counted
+        _line("assistant", 5 * 3600 + 40, "Status: DONE", mid="m3"),    # 40 s
+    ]
+    path = tmp_path / "agent.jsonl"
+    path.write_text("".join(json.dumps(x) + "\n" for x in lines), encoding="utf-8")
+    segs = metrics.transcript_segments(path, ["T1"])
+    assert [s["tid"] for s in segs] == ["T1"]
+    assert segs[0]["active"] == 20 + 30 + metrics.GAP_CAP_S + 30 + 40
+    assert segs[0]["last"] - segs[0]["first"] > 5 * 3600  # wall time, still kept for the schedule

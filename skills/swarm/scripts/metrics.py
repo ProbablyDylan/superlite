@@ -13,7 +13,8 @@ config/models.json. An agent is mapped to its task through `.superlite/pool.json
 `Tn`. Output fields reuse the names of bench/mechanical.py: task, kind, model, tier_planned, agent,
 agent_model_used, dispatches, start_s, end_s, duration_s, tokens {in,out,cache_read,cache_write,...},
 cost_usd, tool_calls, status, complete, rework_dispatches, rework_s, rework_cost, kind_miss_incidents,
-fix_notes, first_time_pass, done_s, start_lag_s, slack_s, on_critical_path. Offline, stdlib only; one parse
+fix_notes, first_time_pass, done_s, start_lag_s, slack_s, on_critical_path. duration_s and rework_s are
+working time, not wall time: an agent waiting for its next message is not counted (transcript_segments). Offline, stdlib only; one parse
 of each file, well under a second for a normal run.
 """
 import argparse
@@ -32,6 +33,7 @@ FAMILIES = ("haiku", "sonnet", "opus")
 TID = re.compile(r"\bT(\d+[a-z]?)\b")
 STATUS = re.compile(r"\bStatus:\s*\**\s*(DONE_WITH_CONCERNS|DONE|NEEDS_CONTEXT|BLOCKED)\b", re.I)
 RED = re.compile(r"\b(?:tests?|suite)\b[^\n]{0,40}\b(?:red|failing|failed)\b|\b\d+\s+failed\b", re.I)
+GAP_CAP_S = 300.0  # one tool run or model turn counts at most this long: a permission prompt can wait on an absent user
 CHARS_PER_TOKEN = 3.5  # output_tokens in a transcript is an early snapshot of a streamed message; text length bounds it below
 
 
@@ -135,27 +137,47 @@ def _count_usage(seen: dict, mid: str, cur: dict, msg: dict) -> None:  # O(usage
             prev["rec"][k] = v
 
 
+def _is_instruction(kind, msg) -> bool:  # O(content)
+    """A user line that is a new message to the agent, not a tool result: the agent was waiting before it."""
+    content = msg.get("content")
+    return kind == "user" and not any(isinstance(b, dict) and b.get("type") == "tool_result"
+                                      for b in (content if isinstance(content, list) else []))
+
+
+def _segment(tid, t) -> dict:
+    return {"tid": tid, "tok": _empty(), "calls": set(), "first": t, "last": t, "active": 0.0, "model": "", "text": ""}
+
+
 def transcript_segments(path, tasks_hint: list) -> list:  # O(bytes of one transcript)
-    """[{tid, tokens, tool_calls, first, last, model, text}] split at user messages that name a Tn.
-    Output tokens are the message's own count (the maximum seen per message id)."""
+    """[{tid, tokens, tool_calls, first, last, active, model, text}] split at user messages that name a Tn.
+    Output tokens are the message's own count (the maximum seen per message id). `active` is working time in
+    seconds: the gaps between user and assistant lines, each capped at GAP_CAP_S, except a gap that ends at a new
+    message to the agent (it sat idle, waiting for the coordinator or the user)."""
     segs: list[dict] = []
     cur = None
     seen: dict[str, dict] = {}  # message id -> its segment record
+    prev_t = None  # time of the last user or assistant line
     for e in read_jsonl(path):
         msg = e.get("message") or {}
         t = _ts(e)
         kind = e.get("type") or e.get("role")  # Claude lines use type; Cursor transcripts use role
-        if kind == "user" and not any(isinstance(b, dict) and b.get("type") == "tool_result"
-                                                for b in (msg.get("content") if isinstance(msg.get("content"), list) else [])):
+        if kind not in ("user", "assistant"):
+            continue
+        waited = _is_instruction(kind, msg)
+        if waited:
             m = TID.search(_text_of(msg.get("content"))[:400])
             if m and (cur is None or cur["tid"] != "T" + m.group(1)):
-                cur = {"tid": "T" + m.group(1), "tok": _empty(), "calls": set(), "first": t, "last": t, "model": "", "text": ""}
+                cur = _segment("T" + m.group(1), t)
                 segs.append(cur)
+        if cur is None and kind == "assistant":  # work before any task message (the prime): belongs to the first task
+            cur = _segment(tasks_hint[0] if tasks_hint else None, t)
+            segs.append(cur)
+        if t is not None:
+            if cur is not None and prev_t is not None and not waited:
+                cur["active"] += min(GAP_CAP_S, max(0.0, t - prev_t))
+            prev_t = t
         if kind != "assistant":
             continue
-        if cur is None:  # work before any task message (the prime): belongs to the first task
-            cur = {"tid": tasks_hint[0] if tasks_hint else None, "tok": _empty(), "calls": set(), "first": t, "last": t, "model": "", "text": ""}
-            segs.append(cur)
         mid = msg.get("id") or f"anon{len(seen)}"
         _count_usage(seen, mid, cur, msg)
         for b in msg.get("content") or []:
@@ -352,7 +374,8 @@ def task_records(sl_dir, plan_path=None, prices=None) -> list:  # O(M + B + n*(n
             if tid:
                 st = (a["start_ms"] or 0) / 1000.0
                 en = (a["stop_ms"] or a["start_ms"] or 0) / 1000.0
-                segs = [{"tid": tid, "tok": _empty(), "calls": set(), "first": st, "last": en, "model": a["model"], "text": a["last"]}]
+                segs = [{"tid": tid, "tok": _empty(), "calls": set(), "first": st, "last": en, "active": max(0.0, en - st),
+                         "model": a["model"], "text": a["last"]}]
         for i, s in enumerate(segs):
             if not s["tid"]:
                 continue
@@ -365,7 +388,7 @@ def task_records(sl_dir, plan_path=None, prices=None) -> list:  # O(M + B + n*(n
             text = s["text"] or (a["last"] if i == len(segs) - 1 else "")
             (rec(s["tid"])["fixes" if fixer else "builds"]).append(
                 {"agent": a["agent"], "type": a["type"], "fam": fam, "tok": s["tok"], "calls": len(s["calls"]),
-                 "start": st, "end": en, "text": text, "complete": a["complete"]})
+                 "start": st, "end": en, "active": s.get("active", en - st), "text": text, "complete": a["complete"]})
     starts = [b["start"] for x in recs.values() for b in x["builds"] + x["fixes"]]
     t0 = min(starts) if starts else 0.0  # run time zero = the earliest agent start
     incidents = read_jsonl(sl_dir / "incidents.jsonl")
@@ -384,7 +407,7 @@ def task_records(sl_dir, plan_path=None, prices=None) -> list:  # O(M + B + n*(n
         last = builds[-1] if builds else None
         sm = STATUS.search(last["text"]) if last else None
         status = sm.group(1).upper() if sm else None
-        rw_s = sum(f["end"] - f["start"] for f in fixes)
+        rw_s = sum(f["active"] for f in fixes)
         rw_c = sum(cost_of(f["tok"], prices.get(f["fam"]) or prices["sonnet"]) for f in fixes)
         misses = [i for i in incidents if re.search(rf"kind-miss\s+{tid}\b", str(i.get("context", "")))]
         notes = [n for n in fix_notes if re.search(rf"\bF-{tid}-\d+|\b{tid}\b", n)]
@@ -396,7 +419,7 @@ def task_records(sl_dir, plan_path=None, prices=None) -> list:  # O(M + B + n*(n
                "agent_type": last["type"] if last else None, "agent_model_used": last["fam"] if last else None,
                "dispatches": len(builds), "start_s": round(min(b["start"] for b in builds) - t0, 1) if builds else None,
                "end_s": round(max(b["end"] for b in builds) - t0, 1) if builds else None,
-               "duration_s": round(sum(b["end"] - b["start"] for b in builds), 1) if builds else None,
+               "duration_s": round(sum(b["active"] for b in builds), 1) if builds else None,  # working time, not wall
                "tokens": {"in": tok["input"], "out": tok["output"], "cache_read": tok["cache_read"],
                           "cache_write": tok["cache_write_5m"] + tok["cache_write_1h"], "cache_write_5m": tok["cache_write_5m"],
                           "cache_write_1h": tok["cache_write_1h"]},

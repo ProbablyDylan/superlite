@@ -263,7 +263,7 @@ class _Lint:
         return coef
 
     def schedule(self, coef: dict) -> None:
-        """Size band (predicted minutes), CHAIN and the time-target warning."""
+        """Size band notes (predicted minutes; advisory both ways), CHAIN and the time-target warning."""
         plan, args = self.plan, self.args
         if self.graph is None or find_cycle(self.graph):
             return
@@ -275,7 +275,8 @@ class _Lint:
             return
         for t in sorted(times, key=nkey):
             if times[t] > high_min + 1e-9:
-                self.add(f"SIZE: {t} predicted {times[t]:.1f} min > {high_min:g} max; split it along its components", [t])
+                self.warnings.append(f"NOTE: SIZE: {t} predicted {times[t]:.1f} min > {high_min:g}; consider splitting it "
+                                     "along its components (advisory, never blocks)")
             elif times[t] < low_min - 1e-9 and t in plan.by_id:
                 self.warnings.append(f"NOTE: {t} predicted {times[t]:.1f} min < {low_min:g}; consider merging with a related task")
         rep = schedule_report(plan, args)

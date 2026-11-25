@@ -31,10 +31,11 @@ def test_band_allows_tasks_the_old_3_min_cap_rejected(tmp_path):
     assert "SIZE" not in cp.out
 
 
-def test_band_size_error_above_high(tmp_path):
+def test_band_size_above_high_is_an_advisory_note(tmp_path):
     cp = pt("lint", "--plan", make_plan(tmp_path, [{"id": "T1", "time": 6.5}]))
-    assert cp.returncode == 1
-    assert "SIZE: T1 predicted 6.5 min > 6 max; split it along its components" in cp.out
+    assert cp.returncode == 0, cp.both
+    assert "NOTE: SIZE: T1 predicted 6.5 min > 6; consider splitting it along its components (advisory, never blocks)" in cp.out
+    assert "ISSUE" not in cp.out
 
 
 def test_band_merge_note_never_fails(tmp_path):
@@ -129,12 +130,12 @@ def test_stable_plan_level_issues_do_not_block(tmp_path):
     assert cp.returncode == 0
 
 
-def test_stable_size_error_is_attributed_structurally(tmp_path):
+def test_stable_oversize_task_still_dispatches(tmp_path):
     p = make_plan(tmp_path, [{"id": "T1", "time": 7}, {"id": "T2", "time": 2}])
-    pt("lint", "--stable", "--plan", p)
+    cp = pt("lint", "--stable", "--plan", p)
     data = stable_json(tmp_path)
-    assert data["stable"] == ["T2"]
-    assert data["fix"][0]["task"] == "T1" and data["fix"][0]["reasons"][0].startswith("SIZE: T1")
+    assert data["stable"] == ["T1", "T2"] and data["fix"] == []
+    assert "NOTE: SIZE: T1" in cp.out and cp.out.rstrip().splitlines()[-1] == "DISPATCH NOW: T1 T2"
 
 
 def test_stable_flagged_chain_members_are_unstable(tmp_path):
@@ -272,7 +273,7 @@ def test_dispatch_now_skips_dispatched_and_none_when_empty(tmp_path):
 
 
 def test_fix_loop_newly_stable_listed_once(tmp_path):
-    p = make_plan(tmp_path, [{"id": "T1", "time": 2}, {"id": "T2", "time": 9}, {"id": "T3", "time": 2}])  # T2 oversize
+    p = make_plan(tmp_path, [{"id": "T1", "time": 2}, {"id": "T2", "time": 3, "ctx": 90}, {"id": "T3", "time": 2}])  # T2 over the context ceiling
     cp = pt("lint", "--stable", "--plan", p)
     assert cp.out.rstrip().splitlines()[-1] == "DISPATCH NOW: T1 T3" and "T2:" in cp.out
     _pool(tmp_path, "T1", "T3")
