@@ -10,7 +10,8 @@ The prime kind is the tier's `prime` value in config/routing.json (sonnet: `slim
   full  rules + the whole plan + the spec sections named by --sections (needs --spec for them).
   mini  (haiku) into .superlite/prime-haiku.md: constraints, stub spec and the interfaces of that tier's tasks.
 
-Prints `sha256 size`. No timestamps; CRLF becomes LF, trailing spaces are
+Every kind ends with the line PRIME_END: a fresh agent's prompt is the prime verbatim, then a `Your batch: Tn,Tm`
+line and its first task (hooks/_edits reads the batch from that line). Prints `sha256 size`. No timestamps; CRLF becomes LF, trailing spaces are
 stripped, and spec sections go in document order whatever order they are
 listed in. Stdlib only.
 """
@@ -22,16 +23,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import state  # noqa: E402
+from incident import KINDS  # noqa: E402
 
 DEFAULT_OUT = f"{state.DIR_NAME}/prime.md"
 MINI_OUT = f"{state.DIR_NAME}/prime-haiku.md"
 DEFAULT_MAX_BYTES = 120_000
+PRIME_END = "End of the superlite prime."  # hooks/_edits matches this literal: change both together
+LAUNCH = "- Your first task follows this prime, after a `Your batch: Tn,Tm` line: start at once; later ones come by message."
+INCIDENT = ("- Log each unexpected failure, workaround or guess: `superlite-cli incident add --file F --line N\n"
+            f"  --context TEXT --kind K` (K: {', '.join(KINDS)}).")
 
-PREAMBLE = """\
+PREAMBLE = f"""\
 # superlite prime
 
 You are an implementer subagent in a superlite run. This prime is identical
-for every agent in the run; the task you are given follows it.
+for every agent in the run; your first task follows it.
 
 Rules:
 - Build only what your task owns (its `Owns` files). Never edit other files.
@@ -39,19 +45,18 @@ Rules:
 - Run only fast, focused tests. Slow suites run later through run_tests.py.
 - Code to the interface stubs and the plan's Consumes and Produces lines.
   Never change a signature without a coordinator ruling.
-- Log every unexpected failure, workaround or guess with `superlite-cli incident add`.
+{INCIDENT}
 - Do not commit. The coordinator records a checkpoint with `superlite-cli checkpoint`.
 - Kill processes by PID only. Never use taskkill /IM, pkill or killall.
-- Reply READY after reading this prime, then wait for your task.
+{LAUNCH}
 - Finish with DONE, DONE_WITH_CONCERNS, BLOCKED or NEEDS_CONTEXT, in at most
   200 words, with no file contents or logs.
 """
 
-PREAMBLE_SLIM = """\
+PREAMBLE_SLIM = f"""\
 # superlite prime (slim)
 
-You are an implementer subagent in a superlite run. This prime is identical for every agent in the run.
-It holds only the rules and what does not change; your task arrives by message after you reply READY.
+You are an implementer subagent in a superlite run. This prime, identical for every agent, holds only fixed rules.
 
 Rules:
 - Build only what your task owns (its `Owns` files). Never edit other files.
@@ -59,30 +64,30 @@ Rules:
 - Run only fast, focused tests. Slow suites run later through run_tests.py.
 - Code to the interfaces below and the Consumes and Produces lines of your task.
   Never change a signature without a coordinator ruling.
-- Your task text is in your task message, generated from the current plan. To read a neighbour, run
-  `bash $SUPERLITE/skills/swarm/scripts/superlite-cli task Tn --plan PLAN` (SUPERLITE and PLAN
-  are in your task message): it prints Tn's block and the Produces lines of every task Tn consumes. Reply
-  NEEDS_CONTEXT to the coordinator only when that does not answer it.
-- Log every unexpected failure, workaround or guess with `superlite-cli incident add`.
+- To read a neighbour task, run `bash $SUPERLITE/skills/swarm/scripts/superlite-cli task Tn --plan PLAN`
+  (SUPERLITE and PLAN are in your task message): it prints Tn's block and the Produces lines of every task Tn
+  consumes. Reply NEEDS_CONTEXT to the coordinator only when that does not answer it.
+{INCIDENT}
 - Do not commit. The coordinator records a checkpoint with `superlite-cli checkpoint`.
 - Kill processes by PID only. Never use image-name or pattern kills.
-- Reply READY after reading this prime, then wait for your task.
+{LAUNCH}
 - Finish with DONE, DONE_WITH_CONCERNS, BLOCKED or NEEDS_CONTEXT, in at most
   200 words, with no file contents or logs.
 """
 
-PREAMBLE_MINI = """# superlite prime (mini)
+PREAMBLE_MINI = f"""# superlite prime (mini)
 
 You are a lane implementer in a superlite run: you take small, fully specified tasks. This prime is
-identical for every lane agent in the run; the task you are given follows it. The full plan and spec
+identical for every lane agent in the run; your first task follows it. The full plan and spec
 are not in your context: your task message and this prime state everything you need.
 
 Rules:
 - Build only what your task owns (its `Owns` files). Never edit other files.
 - Test first, run only the fast focused tests, code to the interfaces below. Never change a signature.
 - Do not commit. Kill processes by PID only.
-- Reply READY after reading this prime, then wait for your task. Finish with DONE, DONE_WITH_CONCERNS,
-  BLOCKED or NEEDS_CONTEXT in at most 200 words.
+{INCIDENT}
+{LAUNCH}
+- Finish with DONE, DONE_WITH_CONCERNS, BLOCKED or NEEDS_CONTEXT in at most 200 words.
 """
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
@@ -160,6 +165,7 @@ def build(plan, spec, sections):  # O(B + out)
     if sections:
         chunks = select_sections(read(spec), sections)
         parts.append("## Spec sections\n\n" + "\n\n".join(normalize(c) for c in chunks))
+    parts.append(PRIME_END)
     return ("\n\n".join(parts) + "\n").encode("utf-8")
 
 
@@ -225,6 +231,7 @@ def build_slim(plan):  # O(B + n*s)
     gi = normalize(gitignore.read(pt.stable_root(plan)))  # the repo's current .gitignore, omitted when absent
     if gi:
         parts.append("## Git-ignored paths (never create source here, never edit .gitignore)" + nl + nl + gi)
+    parts.append(PRIME_END)
     return ((nl + nl).join(parts) + nl).encode("utf-8")
 
 
@@ -246,6 +253,7 @@ def build_mini(plan, tier):  # O(B + n*s)
         lines.append("Owns: " + ", ".join(t.owns))
         lines += [f"Produces: {x}" for x in t.produces] + [f"Consumes: {x}" for x in t.consumes]
     parts.append("## Interfaces your tasks touch" + nl + nl + normalize(nl.join(lines) if lines else "(none yet)"))
+    parts.append(PRIME_END)
     return ((nl + nl).join(parts) + nl).encode("utf-8")
 
 

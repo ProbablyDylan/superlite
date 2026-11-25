@@ -323,6 +323,28 @@ def test_batch_guard_allows_prime_listing_all_tasks(proj):
     assert r.returncode == 0, r.stderr
 
 
+PRIME_END = "### T1 parse\nConsumes: x (T2)\n### T2 lex\n### T3 eval\nEnd of the superlite prime.\n"
+
+
+def test_batch_guard_reads_the_batch_line_after_the_prime(proj):
+    """No READY round-trip: the prime, then `Your batch:` and the task in one prompt; only the batch line names tasks."""
+    sd = proj / ".superlite"
+    (sd / "dispatch.json").write_text(json.dumps({"batches": [["T1", "T2"], ["T3"]]}), encoding="utf-8")
+    (sd / "questions.json").write_text(json.dumps({"waiting": {"T2": {"agent": "a1"}}}), encoding="utf-8")
+    task = "\nYour batch: T3\n\nYour task text: `superlite-cli task T3`. It consumes T1 and T2.\n"
+
+    def launch(prompt):
+        return run(proj, "Agent", {"subagent_type": "superlite:implementer", "prompt": "# superlite prime (slim)\n" + prompt})
+    r = launch(PRIME_END + task)
+    assert r.returncode == 0, r.stderr  # T1/T2 in the prime and the task text are not the batch, nor a waiting question
+    r = launch(PRIME_END + task.replace("batch: T3", "batch: T1"))
+    assert r.returncode == 2 and "Printed batches" in r.stderr and "Your batch: Tn,Tm" in r.stderr
+    r = launch(PRIME_END + task.replace("batch: T3", "batch: T1,T2"))
+    assert r.returncode == 2 and "answer the implementer" in r.stderr
+    assert launch(PRIME_END + "\nBuild T3 now.\n").returncode == 2  # a task without its batch line
+    assert launch(PRIME_END).returncode == 0  # the prime alone assigns nothing
+
+
 def test_batch_guard_denies_empty_implementer(proj):
     (proj / ".superlite" / "dispatch.json").write_text(
         json.dumps({"batches": [["T1", "T2"], ["T3"]]}),

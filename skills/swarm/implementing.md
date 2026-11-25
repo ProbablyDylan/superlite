@@ -1,6 +1,6 @@
 # Implementer guide
 
-Shared by `implementer` and `implementer-haiku`. Your brief gives the plugin root as `$SUPERLITE`. Your first message is the prime; reply READY. Your task arrives in a later message: run the command it names to print your task text, and build from that text and the SPEC section it names, never from memory of the prime. To read a neighbour run `bash $SUPERLITE/skills/swarm/scripts/superlite-cli task Tn --plan PLAN`; reply NEEDS_CONTEXT only when that does not answer it. Read only the code you need. Build what the contract says: the files, exact signatures, and tests with exact values. The plan's Global constraints bind you.
+Shared by `implementer` and `implementer-haiku`. Your brief gives the plugin root as `$SUPERLITE`. Your first message is the prime, then a `Your batch: Tn,Tm` line and your first task: start on it at once, with no READY reply. Later tasks arrive by message. For each task, run the command it names to print your task text, and build from that text and the SPEC section it names, never from memory of the prime. To read a neighbour run `bash $SUPERLITE/skills/swarm/scripts/superlite-cli task Tn --plan PLAN`; reply NEEDS_CONTEXT only when that does not answer it. Read only the code you need. Build what the contract says: the files, exact signatures, and tests with exact values. The plan's Global constraints bind you.
 
 Rules:
 - Edit only the files you own.

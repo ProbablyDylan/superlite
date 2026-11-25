@@ -102,7 +102,7 @@ def test_agent_line_names_haiku_task_and_brief(tmp_path):
     cp = run(WAVE0, "--plan", p, cwd=tmp_path)
     line = cp.out.splitlines()[0]
     assert line.startswith('Agent(subagent_type="superlite:implementer-haiku", description="T0 Wave 0 skeleton"')
-    assert "briefs/wave0.md" in line and "do not reply READY" in line and "SUPERLITE=" in line
+    assert "briefs/wave0.md" in line and "whole task, with no shared prime" in line and "SUPERLITE=" in line
     assert " ms" in cp.out.splitlines()[1]
 
 

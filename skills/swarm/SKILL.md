@@ -1,6 +1,6 @@
 ---
 name: swarm
-description: Use when executing a superlite plan that has a %% taskgraph. Runs a ready-queue scheduler over an idle agent pool, with scripts for the mechanical steps, selective reviews, and a packet-only final review.
+description: Use when executing a superlite plan that has a %% taskgraph. Runs a ready-queue scheduler over an idle agent pool, with scripts for the mechanical steps, selective reviews, and an adversarial final review that starts from a packet and reads the code.
 ---
 
 # Swarm
@@ -38,7 +38,7 @@ flowchart TB
   N[dispatch] --> A{per batch}
   A -- agent=ID --> M[task message]
   A -- poll IDS --> Q[relevance poll] --> M
-  A -- fresh --> P[prime verbatim] -- READY --> M
+  A -- fresh --> P[prime verbatim + batch line] --> M
   M --> D[DONE reports] --> C[checkpoint T.. --dispatch] --> A
   C -. background .-> PR[probe_run --checkpoint]
   C -. both sides in .-> SM[pt_review contract seam]
@@ -47,9 +47,9 @@ flowchart TB
 Keep `.superlite/pool.json`: `{"agents":[{"id","tasks":[...],"files":[...],"context_k":N,"idle_min":N,"busy":false,"current":"Tn","tier":"haiku|sonnet"}]}` (`tier` = the line's; T0's is `haiku`). Sending a line or spawning its agent sets `busy: true` and `current: Tn` (a batch: `Tn,Tm`); `checkpoint` clears each task it records. The ledger and `current` are the state: keep no lists.
 
 1. `bash "$CLI" dispatch --plan $PLAN --cap 10` prints one line per batch (`Tn` or `Tn,Tm`) from packing that minimizes max(B+A, F/T), longest first: `Tn agent=ID tier=T`, `Tn poll ID,ID tier=T` or `Tn fresh tier=T agent=TYPE`. Tiers come from lint (`config/routing.json`); never override or cross them. Start exactly those. Compact every 30 min (`compact_due`).
-2. Per line: `agent=ID`: SendMessage the task to that idle agent. `poll ID,ID`: one SendMessage to each listed agent, "Relevance 0-10 for Tn (files, consumes)? Reply `score: N - reason`"; use the replies present at your next turn, highest wins, tie to the smallest `context_k`. `fresh tier=T agent=TYPE`: Agent TYPE with its tier's prime file pasted verbatim (`.superlite/prime.md`; haiku: `build_prime --tier haiku` writes `prime-haiku.md`), and send its task only after its reply `READY`. `evict=ID` (stderr): drop it. `dispatch` never offers a busy agent or one past its tier's limits.
+2. Per line: `agent=ID`: SendMessage the task to that idle agent. `poll ID,ID`: one SendMessage to each listed agent, "Relevance 0-10 for Tn (files, consumes)? Reply `score: N - reason`"; use the replies present at your next turn, highest wins, tie to the smallest `context_k`. `fresh tier=T agent=TYPE`: Agent TYPE, one prompt: its tier's prime file pasted verbatim first (`.superlite/prime.md`; haiku: `build_prime --tier haiku` writes `prime-haiku.md`; keep it byte-identical and first), then the line `Your batch: Tn,Tm`, then the task message (step 3). No READY round-trip; later tasks go to the idle agent by SendMessage. `evict=ID` (stderr): drop it. `dispatch` never offers a busy agent or one past its tier's limits.
 3. Task message (a batch: one message, in line order): heading and `PLAN`, "your task text: `bash "$CLI" task Tn --plan $PLAN`" (current plan, never retyped), Owns and files not to touch, the Review Focus categories for its files, rulings and interface names (a fake returns the producer's `e.g.` examples), `SUPERLITE=<path>`, the verify command (`bash "$CLI" run_tests --affected --files <owned files> --background`, then `--wait --run <id>` from its `wait:` line; `--fast PATHS` is the manual fallback), append `bash "$CLI" lessons brief --task Tn --plan $PLAN` output, and "reply in at most 200 words per task: status DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED, files, `tests: <passed> <failed> <skipped> run <id>`, open questions".
-4. Mark reporters `busy: false`. Verify each DONE task with `--wait --run <id>` (its reported run id; own file, exit 0 green); a missing or mismatched id is unverified. Then record all DONE tasks in one call (hidden): `bash "$CLI" checkpoint T3 T5 --plan $PLAN --dispatch` saves each task's own files, prints `Tn <sha>` or `Tn FAILED`, then `next:` and dispatch lines. A FAILED task lists unowned files or syntax/import problems: send it back. DONE_WITH_CONCERNS: fix correctness ones first. NEEDS_CONTEXT: always answer the same implementer; if the plan is silent, add a `Ruling:` and answer with it; resume with the answered task first (`--question` / `--answered`). BLOCKED: log (`checkpoint --blocked T --tier X`); fixer one tier up (Fixing). A haiku miss: `bash "$CLI" routing miss --task Tn --plan $PLAN`; never retried on Haiku. Act on the `next:` lines. On `Learned: tag: text`: `bash "$CLI" learn note --task Tn --tag tag --text "…"`.
+4. Mark reporters `busy: false`. Verify each DONE task with `--wait --run <id>` (its reported run id; own file, exit 0 green); a missing or mismatched id is unverified. Then record all DONE tasks in one call (hidden): `bash "$CLI" checkpoint T3 T5 --plan $PLAN --dispatch` saves each task's own files, prints `Tn <sha>` or `Tn FAILED`, then `next:` and dispatch lines. A FAILED task lists syntax/import problems (out-of-scope files only warn): send it back. DONE_WITH_CONCERNS: fix correctness ones first. NEEDS_CONTEXT: always answer the same implementer; if the plan is silent, add a `Ruling:` and answer with it; resume with the answered task first (`--question` / `--answered`). BLOCKED: log (`checkpoint --blocked T --tier X`); fixer one tier up (Fixing). A haiku miss: `bash "$CLI" routing miss --task Tn --plan $PLAN`; never retried on Haiku. Act on the `next:` lines. On `Learned: tag: text`: `bash "$CLI" learn note --task Tn --tag tag --text "…"`.
 5. Each checkpoint has already started `probe_run --checkpoint` and, for each seam whose two sides are now both checkpointed, `pt_review contract --seam` in the background. Pass: `verified`; mismatch: incident. Route the fix per `fixing.md`.
 6. Probe failures: `incident hotspots --files <task files>` before the next work; open failures go to fixers (`fixing.md`). `checkpoint` accepts generated `tests/regression/` files from any task.
 
@@ -86,7 +86,7 @@ flowchart TB
 
 1. Gate: every task checkpointed, every review reported and checkpointed, every seam `verified`.
 2. Build the packet now: `bash "$CLI" plan_tools packet --plan $PLAN --base <start-sha>` uses `.superlite/tests/summary.json`, probe results and incidents, and writes `.superlite/review-packet.md`. Its header says `FAST PATH` or `REVIEW REQUIRED`. In the same message start `bash "$CLI" run_tests --affected --background`; do not wait for it.
-3. Start `superlite:final-reviewer` at the same moment, fresh, brief = `SUPERLITE=<path>` and "read .superlite/review-packet.md", nothing more. The tree stays frozen. It answers in one turn from the packet only: `Verdict: APPROVED` or `CHANGES_REQUESTED` plus `file:line - problem - fix - tier N` lines. Pipe its reply into `bash "$CLI" review_findings record`.
+3. Start `superlite:final-reviewer` at the same moment, fresh, brief = `SUPERLITE=<path>` and "read .superlite/review-packet.md", nothing more. The tree stays frozen. It starts from the packet, then reads the changed files and the code each item names, checks every claim and hunts for bugs the packet misses; it may take several turns. It replies `Verdict: APPROVED` or `CHANGES_REQUESTED` plus `file:line - problem - fix - tier N` lines. Pipe its reply into `bash "$CLI" review_findings record`.
 4. Red suite lines are findings too. Send all to fixers (`fixing.md`: tier by understanding, split by file), then `checkpoint Tn` per owning task and one more `run_tests --affected --background`. Leftovers: a `Ruling:`.
 5. Freeze and checkpoint without waiting on tests. Shipping runs the one blocking run (`run_tests --full --reuse` when the plan says `**Full suite:** yes`, else `run_tests --affected --base <start sha>`); red blocks merge and PR.
 
@@ -108,7 +108,7 @@ Stop and ask only for: an irreversible or destructive operation; a security-sens
 
 | Thought or act | Do instead |
 |---|---|
-| Typing the prime or a task before READY | `build_prime`, paste verbatim, wait for READY |
+| Typing the prime, or launching on the prime alone | `build_prime`, paste verbatim, then `Your batch:` and the task in the same prompt |
 | Work to a busy agent, or "after T3" | `dispatch` |
 | Editing code, raw `pytest`, or a foreground suite | Fixer agent; `run_tests --background` |
 | `git commit` by hand | `checkpoint T3 T5 --dispatch` |

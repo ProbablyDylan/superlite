@@ -6,6 +6,9 @@
 #   4. _rewrite  raw test runs become background `superlite-cli run_tests`; hidden test waits are denied
 # A denial is exit 2 with the reason on stderr; a rewrite prints the updated command as hook JSON and ends
 # the run. Anything else, including malformed input, exits 0 with no output (fail open).
+# Guard light: the run-state checks only add a one-line note (`note TEXT`); after every guard passed, the notes go
+# out as one additionalContext object with no permission decision, so the normal permission flow is untouched.
+# Cursor gets no note (its hook output carries a permission).
 # Bash builtins only (each external process costs ~250 ms on Windows).
 
 # Byte-wise matching: every pattern here is ASCII, and bash 3.2 is 3x slower on long strings in a UTF-8 locale.
@@ -19,8 +22,16 @@ case "$here" in */*) here="${here%/*}" ;; *) here="." ;; esac
 . "$here/_edits"
 . "$here/_rewrite"
 
+notes=""
+note() { notes="${notes:+$notes }$1"; }
+
 guard_kill
 guard_watch
 guard_edits
 guard_rewrite
+re_cursor='"hook_event_name"[[:space:]]*:[[:space:]]*"preToolUse"'
+if [ -n "$notes" ] && ! [[ $input =~ $re_cursor ]]; then
+  esc notes
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"'"$notes"'"}}'
+fi
 exit 0

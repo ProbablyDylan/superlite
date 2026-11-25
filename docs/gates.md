@@ -7,8 +7,8 @@ Instructions drift. Scripts and hooks do not. These gates run on every build:
 | **The coordinator cannot write code** | Every change goes to a fix-only or implementer agent, by tier; the block message says which | `pre-tool` hook |
 | **You approve before anything is orchestrated** | In human mode nothing is linted, dispatched or sent to an agent until a real typed reply approves the plan's overview. Any clear approval counts (yes, go ahead, looks good, or similar) | `pre-tool`, `prompt`, `superlite-cli orchestrator approve --review` |
 | **No unsafe kills** | No `pkill` or `taskkill /IM`; only PIDs the run started (a `pkill -f` on one project port or path is allowed) | `pre-tool` hook |
-| **Tests never block the coordinator** | A raw `pytest`, `npm test`, `go test` and so on is rewritten into a background `superlite-cli run_tests` | `pre-tool` hook |
-| **No hidden waits on tests** | A test run inside an `until`/`while` loop or with its output sent to `/dev/null` is denied; wait with `superlite-cli run_tests --wait`, which reports a SUSPECT HANG | `pre-tool` hook, hang probe |
+| **Tests never block the coordinator** | A raw `pytest`, `npm test`, `go test` and so on is rewritten into a background `superlite-cli run_tests` (guard light: runs as typed) | `pre-tool` hook |
+| **No hidden waits on tests** | A test run inside an `until`/`while` loop or with its output sent to `/dev/null` is denied; wait with `superlite-cli run_tests --wait`, which reports a SUSPECT HANG (guard light: a note, not a denial) | `pre-tool` hook, hang probe |
 | **A plan must lint before work starts** | Stable tasks dispatch at once; others wait with a reason. Size band, frozen interfaces, and chain rulings that must carry the id lint printed | `lint --stable` |
 | **Same plan, same agents** | Task features pick the agent tier from `routing.json`; Haiku only for mechanical tasks off the critical path, never for fixes | `routing.py` |
 | **Agents stay in their tier** | A task goes only to an idle agent of its own tier; nothing queues behind a busy one | `dispatch` |

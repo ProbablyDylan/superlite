@@ -9,7 +9,7 @@
 stdout, one line per batch of ready tasks (one agent, one message), longest predicted first, within the cap:
     Tn agent=<id>        clear winner (score margin >= 3); that agent is now taken
     Tn,Tm poll <id>,<id> tie or no signal: relevance-poll these idle agents
-    Tn fresh             no eligible idle agent: start a primed implementer
+    Tn fresh             no eligible idle agent: start an implementer on the prime + `Your batch: Tn` + task, one prompt
     T0 wave0             synthesized Wave 0 skeleton still pending (`superlite-cli wave0`): its own agent, first line
 stderr: `evict=<id> <reason>` for each idle agent eligible for none of the ready tasks.
 

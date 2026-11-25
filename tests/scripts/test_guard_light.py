@@ -115,11 +115,61 @@ def test_strict_gate_unchanged(tmp_path):
     assert agent(proj, "general-purpose").returncode == 2
 
 
-def test_light_keeps_batch_guard(active, light):
-    sd = active / ".superlite"
-    (sd / "dispatch.json").write_text(json.dumps({"batches": [["T1", "T2"]]}))
-    r = agent(active, "superlite:implementer", "Build T3")
-    assert r.returncode == 2 and "batch" in r.stderr
+def note_of(r):
+    """The additionalContext note of a pass, else ""; a pass never carries a permission decision or a rewrite."""
+    assert r.returncode == 0, r.stderr
+    if not r.stdout.strip():
+        return ""
+    out = json.loads(r.stdout)["hookSpecificOutput"]   # exactly one JSON object
+    assert set(out) == {"hookEventName", "additionalContext"}, out
+    assert out["additionalContext"].startswith("superlite (info): ") and "not blocked (guard light)" in out["additionalContext"]
+    return out["additionalContext"]
+
+
+@pytest.fixture
+def stale(tmp_path):
+    """A run from weeks ago that was never finished: every marker, a dispatch print, no run.finished."""
+    sd = tmp_path / ".superlite"
+    sd.mkdir()
+    for name, body in (("stable.json", '{"stable": ["T1", "T2"], "fix": []}'), ("prime.md", "# superlite prime\n"),
+                       ("pool.json", "{}"), ("dispatch.json", json.dumps({"batches": [["T1", "T2"]]}))):
+        (sd / name).write_text(body)
+    return tmp_path
+
+
+def test_light_run_state_guards_only_inform(stale, tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    (home / "preferences.json").write_text('{"guard": "light"}')
+    monkeypatch.setenv("SUPERLITE_HOME", str(home))
+    monkeypatch.delenv("SUPERLITE_GUARD", raising=False)
+    sd = stale / ".superlite"
+    assert note_of(hbash(stale, "pytest -q")) == ""   # coordinator: runs as typed, silently
+    assert note_of(hrun(stale, "Bash", {"command": "pytest"}, agent_id="a1")) == ""   # subagent full suite
+    assert note_of(agent(stale, "general-purpose", "Review hooks/_edits read-only; compare with T7 and T1.")) == ""
+    assert note_of(agent(stale, "superlite:implementer", "Your batch: T1,T2")) == ""
+    for cmd in ("until pytest -q; do sleep 5; done", "pytest -q > /dev/null 2>&1"):
+        assert "hang" in note_of(hbash(stale, cmd)), cmd
+    assert "not one batch" in note_of(agent(stale, "superlite:implementer", "Build T3"))
+    (sd / "questions.json").write_text(json.dumps({"waiting": {"T2": {"agent": "a1"}}}))
+    assert "T2 waits for an answer" in note_of(agent(stale, "superlite:fixer-sonnet", "Fix T2"))
+    assert not (sd / "incidents.jsonl").exists()   # nothing was blocked or rewritten
+    cursor = json.dumps({"hook_event_name": "preToolUse", "tool_name": "Shell", "tool_input": {"command": "until pytest; do :; done"}})
+    r = hrun(stale, "Shell", {}, raw=cursor)
+    assert r.returncode == 0 and r.stdout == ""   # Cursor: no note (its output carries a permission)
+    (sd / "questions.json").unlink()
+    (sd / "blocked.json").write_text(json.dumps({"blocked": {"T2": {"tier": "opus"}}}))
+    assert "needs a fixer of tier opus, not sonnet" in note_of(agent(stale, "superlite:fixer-sonnet", "Fix BLOCKED T2"))
+    assert note_of(agent(stale, "superlite:fixer-opus", "Fix BLOCKED T2")) == ""
+    assert hbash(stale, "echo {} > .superlite/orchestrator.json").returncode == 2   # protected state files still block
+
+
+def test_strict_run_state_guards_unchanged(stale, monkeypatch):
+    monkeypatch.delenv("SUPERLITE_GUARD", raising=False)
+    r = hbash(stale, "pytest -q")
+    assert r.returncode == 0 and "updatedInput" in r.stdout and "run_tests" in r.stdout
+    assert hrun(stale, "Bash", {"command": "pytest"}, agent_id="a1").returncode == 2
+    assert hbash(stale, "until pytest -q; do sleep 5; done").returncode == 2
+    assert agent(stale, "superlite:implementer", "Build T3").returncode == 2
 
 
 # ---- light: peers ----

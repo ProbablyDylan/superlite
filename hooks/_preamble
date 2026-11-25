@@ -230,7 +230,8 @@ done
 
 # Guard mode: SUPERLITE_GUARD, else "guard" in preferences.json in the superlite home; strict unless it says light.
 # light: the coordinator may write project code, a closed human gate holds only superlite's own build agents and
-# commands, and peer plugins are not suspended. Protected state files and the batch checks stay in every mode.
+# commands, and peer plugins are not suspended. Protected state files stay in every mode; the run-state guards
+# (raw test rewrites and test-wait denials, the batch, question and tier checks) only add a note.
 # Python reads the same setting with guard.mode() in skills/swarm/scripts/guard.py: change both together.
 light=0
 guard_mode="${SUPERLITE_GUARD:-}"

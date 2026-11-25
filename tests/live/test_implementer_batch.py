@@ -7,7 +7,10 @@ pytestmark = pytest.mark.live
 
 
 PROMPT = """
-You already have READY. Your batch is T1, T2, T3, T4 in that order.
+(The shared prime came before this line.) End of the superlite prime.
+Your batch: T1,T2,T3,T4
+
+Work the batch in that order.
 T1 is done. T2's tests stay red after your best fix (treat it as failed).
 T3's tests import and run T2's code. T4 is independent.
 Do not actually edit files. Reply now with your per-task status blocks only.

@@ -112,6 +112,26 @@ def test_slim_is_far_smaller_than_the_full_prime_and_full_stays_selectable(tmp_p
     assert mini.returncode == 0 and (tmp_path / "m.md").read_text(encoding="utf-8").startswith("# superlite prime (mini)")
 
 
+def test_every_prime_kind_launches_with_its_batch_line_through_the_hook(tmp_path):
+    """No READY: each prime ends with PRIME_END and lists the incident kinds; prime + `Your batch:` + task passes strict."""
+    import build_prime
+    from incident import KINDS
+    from test_block_coordinator_edits import run as hrun
+    p = make(tmp_path)
+    (tmp_path / ".superlite" / "dispatch.json").write_text(json.dumps({"batches": [["T3"], ["T1", "T2"]]}), encoding="utf-8")
+    task = "Your task text: `bash cli task T3 --plan plan.md`. It consumes alpha.Parse (T1) and alpha.Lex (T2).\n"
+    for kind in ("slim", "full", "mini"):
+        cp = run(BUILD_PRIME, "--plan", p, "--prime", kind, "--out", tmp_path / f"{kind}.md", cwd=tmp_path)
+        assert cp.returncode == 0, cp.both
+        prime = (tmp_path / f"{kind}.md").read_text(encoding="utf-8")
+        assert prime.endswith(build_prime.PRIME_END + "\n") and prime.count(build_prime.PRIME_END) == 1, kind
+        assert "Reply READY" not in prime and "Your batch: Tn,Tm" in prime
+        assert "--kind K" in prime and all(k in prime for k in KINDS), kind
+        for batch, code in (("T3", 0), ("T4", 2)):
+            r = hrun(tmp_path, "Agent", {"subagent_type": "superlite:implementer", "prompt": f"{prime}\nYour batch: {batch}\n\n{task}"})
+            assert r.returncode == code, (kind, batch, r.stderr)
+
+
 def test_prime_override_config_and_bad_plan(tmp_path):
     p = make(tmp_path)
     cp = run(BUILD_PRIME, "--plan", p, "--prime", "mini", "--tier", "sonnet", "--out", tmp_path / "x.md", cwd=tmp_path)

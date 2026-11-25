@@ -9,6 +9,8 @@
 # .superlite/incidents.jsonl (rule-rewrite). DENIED instead (exit 2, rule-block incident): a known test
 # runner inside an until/while loop, or a test run with stdout sent to /dev/null; also a subagent bare
 # full suite. Only known runners match, so `until curl ...` and `until [ -f x ]` pass.
+# Guard light (hooks/_preamble): never a rewrite or a denial, since a run marker outlives its run when finish is
+# skipped. A hidden test wait only adds a note (see hooks/pre-tool); every other call passes silently.
 # Returning means allow (a rewrite prints its JSON first); exit 2 is a denial.
 
 guard_rewrite() {
@@ -113,7 +115,11 @@ project_hit() {
   done
   return 1
 }
-deny() {
+deny() {   # under guard light a note: the caller returns after it
+  if [ "$light" = 1 ]; then
+    note 'superlite (info): a test runner in an until/while loop or with stdout sent to /dev/null makes a hang look like a slow run; `superlite-cli run_tests --background`, then `--wait`, reports one - not blocked (guard light)'
+    return 0
+  fi
   local t="${cmd:0:100}"; t="${t//[\"\\$'\n\r\t']/ }"
   t="${t//$ph1/>&}"; t="${t//$ph2/&>}"
   printf '{"kind":"rule-block","agent":"coordinator","tool":"Bash","target":"hidden test wait: %s"}\n' "$t" \
@@ -139,8 +145,9 @@ re_any="(^|[^[:alnum:]_.-])${re_test#^}"
 runner_any=1
 if [ "${#cmd}" -ge "$BIG" ] && ! [[ $cmd =~ $re_any ]]; then runner_any=0; fi
 
-# Subagents: deny a bare full-suite runner; leave everything else untouched.
+# Subagents: deny a bare full-suite runner; leave everything else untouched (guard light: no denial).
 if [ "$has_agent" = 1 ]; then
+  [ "$light" = 1 ] && return 0
   case "$cmd" in *test*|*jest*) ;; *) return 0 ;; esac   # every runner pattern holds "test" or "jest"
   [ "$runner_any" = 1 ] || return 0
   _rest="$cmd"; _last=0
@@ -160,8 +167,8 @@ case "$cmd" in *until*|*while*|*null*|*[Nn][Uu][Ll]*) hid=1 ;; *) hid=0 ;; esac
 if [ "$hid" = 1 ]; then
   load_project_runner
   if [[ $cmd =~ $re_loop ]]; then
-    [[ $cmd =~ $re_in_loop ]] && deny
-    [ "${#pp[@]}" -gt 0 ] && project_hit "$cmd" loop && deny
+    [[ $cmd =~ $re_in_loop ]] && { deny; return 0; }
+    [ "${#pp[@]}" -gt 0 ] && project_hit "$cmd" loop && { deny; return 0; }
   fi
 fi
 
@@ -174,8 +181,8 @@ while :; do
   if [[ $rest =~ $re_seg ]]; then seg="${BASH_REMATCH[1]}"; sep="${BASH_REMATCH[2]}"; rest="${BASH_REMATCH[3]}"; last=0
   else seg="$rest"; sep=""; last=1; fi
   if [ "$hid" = 1 ] && [[ $seg =~ $re_null ]]; then   # a known runner with stdout sent to /dev/null
-    if [[ $seg =~ $re_known ]]; then deny; fi
-    if [ "${#pp[@]}" -gt 0 ] && project_hit "$seg" seg; then deny; fi
+    if [[ $seg =~ $re_known ]]; then deny; return 0; fi
+    if [ "${#pp[@]}" -gt 0 ] && project_hit "$seg" seg; then deny; return 0; fi
   fi
   # A quote that spans a separator: an odd number of quotes in the segment.
   count_char seg '"'; q=$COUNT; count_char seg "'"; q2=$COUNT
@@ -190,6 +197,7 @@ while :; do
   [ "$last" = 1 ] && break
 done
 [ "$changed" = 1 ] || return 0
+[ "$light" = 1 ] && return 0   # guard light: the raw run goes ahead as typed, with no note and no incident
 
 orig="${cmd:0:120}"; orig="${orig//[\"\\$'\n\r\t']/ }"
 printf '{"kind":"rule-rewrite","agent":"coordinator","tool":"Bash","command":"%s"}\n' "$orig" \

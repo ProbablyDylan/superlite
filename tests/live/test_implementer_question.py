@@ -7,7 +7,10 @@ pytestmark = pytest.mark.live
 
 
 PROMPT = """
-You already have READY. Your batch is T1, T2, T3 in that order.
+(The shared prime came before this line.) End of the superlite prime.
+Your batch: T1,T2,T3
+
+Work the batch in that order.
 T1 is finished and checkpointed. You are about to start T2. The plan for T2 says
 "return the parsed value" but never says which type. You cannot resolve it from
 `superlite-cli task` or the SPEC. Do not write any file. What is your immediate reply?

@@ -150,7 +150,7 @@ def build_brief(plan, plan_path: str, task, tid: str) -> str:  # O(L + q*s)
                     "initialisers, test-runner config, and one file of shared error/data types per source directory the stub spec names.\n")
     return f"""# {tid}: Wave 0 skeleton
 
-You are {tid}, a one-off skeleton task. This message is your whole task, not the shared plan: do not reply READY. Plan: `{plan_path}`. Edit only the files you own.
+You are {tid}, a one-off skeleton task. This message is your whole task, with no shared prime: start now. Plan: `{plan_path}`. Edit only the files you own.
 
 ## Global constraints and stack (as the plan states them)
 
@@ -189,7 +189,7 @@ def synth_info(plan_path: str):
 
 
 def agent_line(brief: Path, tid: str) -> str:
-    prompt = (f"SUPERLITE={SUPERLITE.as_posix()}. This message is your whole task, not the shared plan: do not reply READY. "
+    prompt = (f"SUPERLITE={SUPERLITE.as_posix()}. This message is your whole task, with no shared prime: start now. "
               f"Read {brief.as_posix()} and do it. Reply in the implementer report format.")
     return f'Agent(subagent_type="superlite:implementer-haiku", description="{tid} Wave 0 skeleton", prompt={json.dumps(prompt)})'
 

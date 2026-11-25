@@ -21,8 +21,12 @@
 #     .. component is project code.
 #  4. BATCH (active run + Agent/Task for an implementer): the prompt's assigned task ids must be
 #     exactly one batch from .superlite/dispatch.json (last `superlite-cli dispatch` print). Denial lists the
-#     printed batches. A shared-prime spawn that only asks for READY (task comes later) is not an
-#     assignment. An empty prompt (no task ids) is denied. T0 is a batch when dispatch printed it.
+#     printed batches. A fresh agent's launch is the prime verbatim (it lists every stable task and ends with
+#     "End of the superlite prime."), then a `Your batch: Tn,Tm` line and the task: only that line counts. A prime
+#     with no task after it, or an old prime that asks for READY, is not an assignment. An empty prompt (no task
+#     ids) is denied. T0 is a batch when dispatch printed it. The question and tier checks also read only the
+#     text after the prime. Guard light: the batch, question and tier checks add a note instead (hooks/pre-tool),
+#     for implementer and fixer agents only.
 # Monitor runs its command in the same shell as Bash, so its command is checked as Bash.
 # Bash/PowerShell write detection is best-effort; when unsure, allow. Sessions without a .superlite
 # directory are never touched. Exit 2 blocks (message on stderr; Cursor also gets
@@ -176,10 +180,18 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
     elif [ "$active" = 1 ]; then
       jstr prompt; pr="$REPLY"
       [ -n "$pr" ] || { jstr description; pr="$REPLY"; }
+      # A launch with the prime: only its `Your batch:` line names tasks (a regex: ${pr#*...} is quadratic).
+      prime_only=0
+      re_end='End of the superlite prime\.(.*)$'; re_bl='Your batch:[[:space:]]*([^\\]*)'; re_t='T[0-9]'
+      if [[ $pr =~ $re_end ]]; then
+        pr="${BASH_REMATCH[1]}"
+        if [[ $pr =~ $re_bl ]]; then pr="${BASH_REMATCH[1]}"
+        elif [[ $pr =~ $re_t ]]; then pr=""   # a task after the prime without its batch line
+        else prime_only=1; fi
+      fi
       if [ -f "$sd/dispatch.json" ]; then
         case "$st" in *implementer*|Implementer*|generalPurpose|general-purpose|"")
-          # Shared prime: list every stable task, then wait for READY. Not a batch assignment.
-          prime_only=0
+          # Old shared prime: list every stable task, then wait for READY. Not a batch assignment.
           case "$pr" in
             *"Reply READY after reading this prime"*)
               case "$pr" in
@@ -225,7 +237,9 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
                 fi
               fi
             done
-            if [ "$ok" != 1 ]; then
+            if [ "$ok" != 1 ] && [ "$light" = 1 ]; then
+              case "$st" in *implementer*|Implementer*) [ -n "$ids" ] && note "superlite (info): this implementer prompt names ${ids}, not one batch from the last superlite-cli dispatch (${printed:-none}) - not blocked (guard light)" ;; esac
+            elif [ "$ok" != 1 ]; then
               hit="batch ${ids:-(empty)}"; batchhit=1
               BATCH_PRINTED="${printed:-none}"
             fi
@@ -242,7 +256,8 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
           tid="${BASH_REMATCH[0]}"; rest="${rest#*"$tid"}"
           case "$qj" in *"\"$tid\""*)
             case "$st" in *fixer*|*Fixer*|*implementer*|Implementer*|generalPurpose|general-purpose)
-              hit="question $tid"; qhit=1
+              if [ "$light" = 0 ]; then hit="question $tid"; qhit=1
+              else case "$st" in *fixer*|*Fixer*|*implementer*|Implementer*) note "superlite (info): $tid waits for an answer in .superlite/questions.json; answer the implementer that asked rather than start another agent on it - not blocked (guard light)" ;; esac; fi
               break
               ;;
             esac
@@ -264,7 +279,9 @@ if [ "$tool" = Agent ] || [ "$tool" = Task ]; then
               rank() { case "$1" in haiku) echo 1;; sonnet) echo 2;; opus) echo 3;; *) echo 0;; esac; }
               got=haiku
               case "$st" in *opus*|*Opus*) got=opus;; *high*|*High*|*-sonnet-high*) got=sonnet;; *sonnet*|*Sonnet*) got=sonnet;; esac
-              if [ "$(rank "$got")" -lt "$(rank "$need")" ]; then
+              if [ "$(rank "$got")" -lt "$(rank "$need")" ] && [ "$light" = 1 ]; then
+                note "superlite (info): $tid needs a fixer of tier $need, not $got - not blocked (guard light)"; break
+              elif [ "$(rank "$got")" -lt "$(rank "$need")" ]; then
                 hit="tier $tid need=$need got=$got"; thit=1
                 NEED_TIER="$need"
                 break
@@ -523,6 +540,7 @@ elif [ "$tryout" = 1 ] && [ "$gatehit" = 1 ]; then
   msg='Feature flow: the integration build waits for the human'"'"'s try-out of the prototype. Show how to try it (`superlite-cli proto tryout`), ask the human to reply "it works" or list changes, end your turn, then run `superlite-cli proto tryout --approve`. Changes go back to the prototype: `superlite-cli proto start --topic <topic>` reopens it for a fix round. Agents with no Edit, Write or shell tools (read-only reviewers and scanners) may run.'
 elif [ "$batchhit" = 1 ]; then
   msg="Blocked: implementer tasks must match one batch from the last superlite-cli dispatch. Printed batches: ${BATCH_PRINTED}. Launch exactly one of those batches, not ${hit#batch }."
+  msg+=' A fresh agent gets the prime verbatim, then a `Your batch: Tn,Tm` line, then its task, in one prompt.'
 elif [ "${qhit:-0}" = 1 ]; then
   msg="Blocked: answer the implementer that asked (task ${hit#question }). Do not launch a fixer or a new implementer while the question waits."
 elif [ "${thit:-0}" = 1 ]; then

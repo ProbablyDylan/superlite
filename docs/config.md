@@ -25,7 +25,8 @@ How much the hooks hold the main session back. `superlite-cli guard set light|st
 | `superlite-cli dispatch`, `assign`, `wave0`, `checkpoint`, `finish`, `build_prime` before approval | denied | denied |
 | superpowers during a run | suspended | left alone |
 | `.superlite/orchestrator.json`, `feature.json`, `human-replies.jsonl` | never written by the model | same |
-| Batch, question and tier checks on implementers and fixers | on | on |
+| Batch, question and tier checks on implementers and fixers | denied | a one-line note |
+| Raw test runs and hidden test waits during a run | rewritten into `superlite-cli run_tests` / denied | run as typed / a one-line note |
 | Killing processes by name or pattern (`pkill`, `killall`, `taskkill /IM`) | denied: kill by PID | allowed; only `kill -9 -1` is denied |
 | `superlite-cli session ensure` | cuts a session branch, or a worktree beside an open run | works in place on the current branch; a different topic sets the live run aside (open: `.superlite/parked/<topic>/`, finished: `.superlite/archive/<topic>-<date>/`) and brings back a parked run of the same name |
 | Shipping | merge, pull request or keep the session branch | commit here or leave uncommitted |
