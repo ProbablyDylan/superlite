@@ -96,6 +96,16 @@
                                     running, aborted, done; tasks, ledger.
    /superlite:tail [dir]            The same run as a terminal feed, for
                                     where the agent map mod is not installed.
+   /superlite:send <text>           Send a run to the active factory
+                                    (--plan FILE, --superlite).
+   /superlite:factory <verb>        Factories: list, add, use, login,
+                                    logout, mcp. superlite-cloud is built in;
+                                    superlite-warp is optional (only
+                                    for Warp Factories).
+   /superlite:runs, :watch, :attach, :give, :detach
+                                    Run commands; <factory>:<ref> names a
+                                    run on any factory, a bare ref uses the
+                                    active one.
    /superlite:review [branch]       Review and harden an existing branch.
    /superlite:research <topic>      Research mode: sourced ledger, then a
                                     report at the level you pick.
@@ -103,6 +113,8 @@
    /superlite:finish                Verify, then offer merge or PR options.
    /superlite:merged [slug|PR]      After the PR merges: update main, close
                                     the session, delete the local branch.
+   /superlite:close [slug|branch]   End a session without a merge; keep or
+                                    delete its local branch. Never pushes.
    /superlite:setup                 First-run check: toolchain, test command,
                                     model tiers, plugin conflicts.
 
@@ -128,6 +140,7 @@
    A plan must lint before work starts            lint --stable
    Same plan, same model tiers                    routing.json
    Every run is measured                          capture hooks, history
+   Each repo's lessons carry to the next run      lessons, learn
 
  ------------------------------------------------------------------------------
  WHERE THINGS ARE

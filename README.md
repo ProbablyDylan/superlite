@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://iha2.github.io/superlite/"><b>📖 Documentation site: how superlite works, with diagrams</b></a>
+</p>
+
+<p align="center">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-6366f1">
   <img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude%20Code-plugin-2dd4bf">
   <img alt="parallel agents" src="https://img.shields.io/badge/parallel%20agents-up%20to%2018-c084fc">
@@ -50,8 +54,11 @@ Each run starts its own session automatically (`superlite-cli session ensure`): 
 | `/superlite:human`, `/superlite:ai`, `/superlite:approve` | Choose who orchestrates; approve the review plan |
 | `/superlite:status`, `/superlite:stop`, `/superlite:resume` | Watch, stop or resume a build |
 | `/superlite:agents`, `/superlite:tail` | Watch a run: the agent map pane, or the same run as a terminal feed without the mod |
+| `/superlite:send <text>`, `/superlite:factory <verb>` | Send a run to the active factory (`--plan FILE`, `--superlite`) and manage factories: `list`, `add`, `use`, `login`, `logout`, `mcp`. superlite-cloud is built in; `superlite-warp` is an optional plugin: install it only if you use Warp Factories (`/plugin install superlite-warp@superlite-dev`) |
+| `/superlite:runs`, `/superlite:watch`, `/superlite:attach`, `/superlite:give`, `/superlite:detach` | Work with runs on a factory; `<factory>:<ref>` (for example `warp:1a2b3c4d`) names a run on that factory, a bare ref uses the active one |
 | `/superlite:review`, `/superlite:report`, `/superlite:finish` | Review a branch, read build reports, finish the branch |
 | `/superlite:merged [slug\|branch\|PR]` | After the PR merges: confirm it with `gh`, update local main, close the session, delete the local branch |
+| `/superlite:close [slug\|branch]` | End a session without a merge: archive its run, remove its worktree, keep or delete the local branch |
 | `/superlite:setup`, `/superlite:intro`, `/superlite:help [section]` | First-run check, the intro screen, the detailed help |
 
 Plain words work just as well; the commands are shortcuts.
@@ -142,7 +149,9 @@ And it is not tied to one language. A TypeScript site generator went from spec t
 
 ## More
 
-How it works, in [docs/](docs/): [how a run works](docs/how-a-run-works.md) · [skills and agents](docs/skills-and-agents.md) · [hooks](docs/hooks.md) · [tools](docs/tools.md) · [config](docs/config.md) · [language support](docs/language.md) · [how the rules are enforced](docs/gates.md). Installation for other harnesses, the benchmark harness and the task list follow below.
+The full guide, with walkthroughs and diagrams, is on the [documentation site](https://iha2.github.io/superlite/).
+
+How it works, in [docs/](docs/): [how a run works](docs/how-a-run-works.md) · [skills and agents](docs/skills-and-agents.md) · [hooks](docs/hooks.md) · [tools](docs/tools.md) · [config](docs/config.md) · [language support](docs/language.md) · [how the rules are enforced](docs/gates.md) · [an example review plan](docs/example-review-plan.md). Installation for other harnesses, the benchmark harness and the task list follow below.
 
 ---
 
