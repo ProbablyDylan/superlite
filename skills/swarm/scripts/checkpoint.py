@@ -20,7 +20,7 @@ adds changed files outside Owns to the first task, even another task's (with a n
 Steps: scope check (changes outside every task's Owns are left out with a warning on stderr and a noted
 incident, never refusing; files another task owns are left out, silently), py_compile plus an import check
 on each touched .py file under the project's interpreter (checkpoint_import.check; a missing third-party
-module only warns), checkpoint with the task title, append `- checkpoint Tn <sha>
+module only warns when superlite's own Python ran it), checkpoint with the task title, append `- checkpoint Tn <sha>
 <title>` to the progress ledger, then launch in the background `superlite-cli probe_run
 --checkpoint SHA` and, for every seam of the task graph (`superlite-cli plan_tools taskgraph
 --format full`) with both sides now checkpointed, `superlite-cli pt_review contract --plan P
@@ -415,6 +415,7 @@ def checkpoint_one(a, tid, info, own_files):  # O(m*o + py size) + git spawns (s
     for i in a.include if tid == a.task[0] else []:
         if not any(cs.include_match([i])(f) for f in mine):
             print(f"warning: --include {i}: no change to save", file=sys.stderr)
+    out_of_scope = cs.unsaved(out_of_scope, load_state(), a.plan)  # an --include saved earlier is not warned again
     if out_of_scope:  # never refuses: warn, log a noted incident per top-level directory, save the task's own files
         cs.warn_out_of_scope(tid, out_of_scope, a.log)
     if not mine:
@@ -516,7 +517,7 @@ def main(argv=None):  # O(L + t*(m*o)) + git spawns per task; one process for al
     if not a.task:
         nt.die("checkpoint needs a task id (or --question/--answered/--blocked)")
     if not found:
-        nt.die("no plan found for this run (no checkpoints.json or pool plan, no single docs/plans match): pass --plan <plan.md>")
+        nt.die(f"no plan found for this run with a heading for {', '.join(a.task)} (none recorded, or none of the recorded plans has them; no single docs/plans match): pass --plan <plan.md>")
 
     info = nt.parse_plan(a.plan)
     if "T0" not in info:  # a Wave 0 task synthesized by `wave0`

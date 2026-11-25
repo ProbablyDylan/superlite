@@ -3,11 +3,14 @@
 resolve_plan(given, tids, pool) -> (plan or None, source): `given` as is; else the plan the run recorded (its
 checkpoints.json, the pool, the agent plan beside the approved review plan), used verbatim so the checkpoint chain
 continues; else next_tasks.DEFAULT_PLAN when it exists; else the one docs/plans/*.md holding every task heading.
+A recorded or default plan without a heading for every requested task (an abandoned run's) is skipped with a note.
+unsaved(files, st, plan): drop the out-of-scope files the run's last checkpoint already holds as they are now.
 warn_out_of_scope(tid, files, log): print warnings and the .gitignore hint to stderr, log one noted incident per
 top-level directory. Out-of-scope files never refuse a checkpoint. Stdlib only.
 """
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -50,10 +53,35 @@ def resolve_plan(given, tids, pool):  # O(P*L)
     agent_plan = COMPANION.sub(".md", review) if review and COMPANION.search(review) else None
     for src, p in (("checkpoints.json", _recorded(sl / "checkpoints.json", "plan")), ("pool", _recorded(pool, "plan")),
                    ("review plan", agent_plan), ("default", nt.DEFAULT_PLAN)):
-        if p and Path(p).is_file():
+        if not (p and Path(p).is_file()):
+            continue
+        if has_tasks(p, tids):
             return p, src
+        lacking = [t for t in tids if t != "T0" and not has_tasks(p, [t])]
+        print(f"note: plan {p} ({src}) has no heading for {', '.join(lacking)}; skipped", file=sys.stderr)
     guess = guess_plan(tids)
     return (guess, "docs/plans") if guess else (None, "")
+
+
+def _git_out(*args):  # O(output) + process spawn
+    r = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+    return r.stdout if r.returncode == 0 else ""
+
+
+def unsaved(files, st, plan):  # O(m + c) + 2 git spawns only when a file was saved by an earlier checkpoint
+    """`files` minus those this run's last checkpoint already holds with today's content (an --include saved
+    earlier), so they are not warned about and logged again on every checkpoint. Another plan's state never counts."""
+    entries = st.get("entries") if isinstance(st, dict) and st.get("plan") == plan else None
+    saved = {f for e in entries or [] for f in e.get("files") or []}
+    hits = [f for f in files if f in saved]
+    if not hits or not entries[-1].get("sha"):
+        return files
+    rows = [r.split("\t", 1) for r in _git_out("ls-tree", "-r", "-z", entries[-1]["sha"], "--", *hits).split("\0") if "\t" in r]
+    held = {path: meta.split()[2] for meta, path in rows}  # "<mode> blob <sha>\t<path>"
+    present = [f for f in hits if os.path.exists(f)]
+    now = dict(zip(present, _git_out("hash-object", "--", *present).split())) if present else {}
+    same = {f for f in hits if held.get(f) == now.get(f)}  # unchanged, or deleted and saved as deleted
+    return [f for f in files if f not in same]
 
 
 def norm_path(p):  # O(len p)

@@ -211,3 +211,69 @@ def test_non_python_changes_never_touch_an_interpreter(tmp_path):
     r = cp(repo, "T4", "--plan", "plan.md", env={**ENV, "SUPERLITE_PROJECT_PYTHON": str(tmp_path / "no" / "python")})
     assert r.returncode == 0, r.stdout + r.stderr
     assert "import" not in r.stderr
+
+
+# ------------------------------------------------------------------ 5. review fixes
+
+def test_a_missing_module_under_the_project_interpreter_fails(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py", "import helpres_typo_xyz\n")  # a typo, or a deleted project module
+    r = cp(repo, "T1", "--plan", "plan.md", env={**ENV, "SUPERLITE_PROJECT_PYTHON": sys.executable})
+    assert r.returncode == 1 and "import src/a.py:1" in r.stdout and "helpres_typo_xyz" in r.stdout
+
+
+def test_a_missing_module_after_falling_back_warns_and_says_so(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py", "import helpres_typo_xyz\n")
+    r = cp(repo, "T1", "--plan", "plan.md", env={**ENV, "SUPERLITE_PROJECT_PYTHON": str(tmp_path / "no" / "python")})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "fell back to superlite's own Python" in r.stderr and "helpres_typo_xyz" in r.stderr
+
+
+NEW_PLAN = "### T7 · later · Complexity 1 · Est. context 5k · Est. time 1 min\n\n**Owns:** `src/g.py`\n"
+
+
+def test_a_recorded_plan_without_the_task_is_skipped(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py")
+    assert cp(repo, "T1", "--plan", "plan.md").returncode == 0  # an earlier run recorded plan.md
+    write(repo, "docs/plans/2026-11-24-next.md", "# Next\n\n## 9. Implementation plan\n\n" + NEW_PLAN)
+    write(repo, "src/g.py")
+    r = cp(repo, "T7")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "plan: docs/plans/2026-11-24-next.md" in r.stderr and "plan.md (checkpoints.json) has no heading for T7" in r.stderr
+    assert tree(repo, r.stdout.strip()) == ["src/g.py"]
+
+
+def test_no_plan_with_the_task_asks_for_plan(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py")
+    assert cp(repo, "T1", "--plan", "plan.md").returncode == 0
+    write(repo, "src/g.py")
+    r = cp(repo, "T7")
+    assert r.returncode == 2 and "--plan" in r.stderr and "has no heading for T7" in r.stderr
+
+
+def test_an_included_file_is_not_warned_again_once_saved(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py")
+    write(repo, "tests/test_other.py", "def test_x():\n    assert True\n")
+    assert cp(repo, "T1", "--include", "tests/test_other.py", "--plan", "plan.md").returncode == 0
+    write(repo, "src/b.py")
+    r = cp(repo, "T2", "--plan", "plan.md")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning: out-of-scope" not in r.stderr and incidents(repo) == []
+    write(repo, "tests/test_other.py", "def test_x():\n    assert 1\n")  # changed again since: warn again
+    write(repo, "src/c.py")
+    r = cp(repo, "T3", "--plan", "plan.md")
+    assert r.returncode == 0 and "out-of-scope tests/test_other.py" in r.stderr
+
+
+def test_an_included_file_is_not_warned_by_the_next_task_in_the_same_call(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py")
+    write(repo, "src/b.py")
+    write(repo, "notes.txt", "kept\n")
+    r = cp(repo, "T1", "T2", "--include", "notes.txt", "--plan", "plan.md")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warning: out-of-scope" not in r.stderr and incidents(repo) == []

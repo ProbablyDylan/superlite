@@ -2,9 +2,10 @@
 
 check(files, dir_name, root) -> (errors, warnings), each [(file, line, msg)]. The driver runs under
 _pyrun.project_python(root) ($SUPERLITE_PROJECT_PYTHON, the project's venv, `uv run python`), else this interpreter;
-an interpreter that cannot start or crashes falls back to this one with a warning. A ModuleNotFoundError for a
-module that is not part of the project (not under the root, src/, a sandbox or the file's folder) is a warning:
-the project's dependencies may simply be missing here.
+an interpreter that cannot start, crashes or times out falls back to this one with a warning. Under the project's
+interpreter every failure is an error (a typo'd or deleted module included). Only under this interpreter (no project
+interpreter, or the fallback), which lacks the project's dependencies, is a ModuleNotFoundError for a module that is
+not part of the project (not under the root, src/, a sandbox or the file's folder) a warning.
 """
 import json
 import os
@@ -98,16 +99,21 @@ def _run(py, files, dir_name, root):  # O(m_py * import cost) + 1 process spawn
 def check(files, dir_name, root="."):  # O(m_py * import cost) + 1-2 process spawns
     if not files:
         return [], []
-    py = _pyrun.project_python(root) or [sys.executable]
+    project = _pyrun.project_python(root)
+    py = project or [sys.executable]
     out, why = _run(py, files, dir_name, root)
     notes = []
-    if out is None and py != [sys.executable]:
-        notes.append((files[0], 0, f"import check under {' '.join(py)} failed ({why}); checked with {sys.executable}"))
-        py = [sys.executable]
+    if out is None and project:
+        notes.append((files[0], 0, f"import check under the project interpreter {' '.join(py)} failed ({why}); fell back "
+                                   f"to superlite's own Python {sys.executable}, which lacks the project's dependencies: "
+                                   "missing modules are warnings only"))
+        project, py = None, [sys.executable]
         out, why = _run(py, files, dir_name, root)
     if out is None:
         return [(files[0], 0, f"import check crashed: {why}")], notes
+    if project:  # the project's own interpreter answered: a missing module is a real failure
+        return [(f["file"], f["line"], f["error"]) for f in out], notes
     errors = [(f["file"], f["line"], f["error"]) for f in out if not f.get("third_party")]
-    missing = [(f["file"], f["line"], f"{f['error']} (not part of the project; not installed for {' '.join(py)})")
-               for f in out if f.get("third_party")]
+    missing = [(f["file"], f["line"], f"{f['error']} (not part of the project; not installed for superlite's own Python "
+                                      f"{sys.executable}, so not checked)") for f in out if f.get("third_party")]
     return errors, notes + missing
