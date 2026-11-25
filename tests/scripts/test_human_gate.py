@@ -41,8 +41,8 @@ def guard(proj, tool, tool_input, env=None, **extra):
     return subprocess.run([BASH, str(GUARD)], input=raw, capture_output=True, text=True, env=env)
 
 
-def bash(proj, cmd):
-    return guard(proj, "Bash", {"command": cmd})
+def bash(proj, cmd, env=None):
+    return guard(proj, "Bash", {"command": cmd}, env=env)
 
 
 def test_human_allows_inline_code_writes(human):
@@ -287,6 +287,23 @@ def test_protected_files_denied_in_every_state(tmp_path, state, name):
         r = bash(proj, cmd)
         assert r.returncode == 2, cmd
         assert "superlite-cli orchestrator" in r.stderr
+
+
+@pytest.mark.parametrize("guard_mode", ["strict", "light"])
+def test_interpreter_writes_to_protected_files_denied_but_prose_in_a_heredoc_passes(tmp_path, guard_mode):
+    proj = make(tmp_path, "ai")
+    env = {"SUPERLITE_GUARD": guard_mode}
+    for cmd in ("python3 -c \"open('.superlite/orchestrator.json','w').write('x')\"",
+                "python3 - <<'EOF'\nfrom pathlib import Path\n(Path('.superlite') / 'human-replies.jsonl').write_text('x')\nEOF",
+                "python3 - <<'EOF'\nd = '.superlite'\nopen(f\"{d}/orchestrator.json\", 'a').write('x')\nEOF",
+                "node -e \"require('fs').writeFileSync(process.argv[1], 'x')\" .superlite/orchestrator.json",
+                "python3 - .superlite/feature.json <<'EOF'\nimport sys\nopen(sys.argv[1], 'w').write('x')\nEOF"):
+        r = bash(proj, cmd, env=env)
+        assert r.returncode == 2 and "superlite-cli orchestrator" in r.stderr, cmd
+    patch = ("python3 - <<'EOF'\np = 'hooks/session-start'\ns = open(p).read()\n"
+             "s = s.replace('elif [ -f .superlite/orchestrator.json ] && [ -d docs/plans ]; then', 'x')\n"
+             "s += '# replies go to .superlite/human-replies.jsonl via the hook'\nopen(p, 'w').write(s)\nEOF\ngit diff --stat")
+    assert bash(proj, patch, env=env).returncode == 0  # source text that only mentions the names
 
 
 def test_protected_reads_and_sl_orchestrator_allowed(tmp_path):
