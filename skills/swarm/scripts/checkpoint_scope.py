@@ -31,6 +31,14 @@ def _recorded(path, key):
     return v if isinstance(v, str) and v else None
 
 
+def same_plan(a, b) -> bool:  # O(path)
+    """One plan file however it is spelled (relative, ./, absolute, backslashes): the run's chain must not reset."""
+    if not a or not b:
+        return a == b
+    norm = lambda p: os.path.normcase(os.path.abspath(str(p).replace("\\", "/")))  # noqa: E731
+    return a == b or norm(a) == norm(b)
+
+
 def has_tasks(path, tids):  # O(L)
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -73,7 +81,7 @@ def _git_out(*args):  # O(output) + process spawn
 def unsaved(files, st, plan):  # O(m + c) + 2 git spawns only when a file was saved by an earlier checkpoint
     """`files` minus those this run's last checkpoint already holds with today's content (an --include saved
     earlier), so they are not warned about and logged again on every checkpoint. Another plan's state never counts."""
-    entries = st.get("entries") if isinstance(st, dict) and st.get("plan") == plan else None
+    entries = st.get("entries") if isinstance(st, dict) and same_plan(st.get("plan"), plan) else None
     saved = {f for e in entries or [] for f in e.get("files") or []}
     hits = [f for f in files if f in saved]
     if not hits or not entries[-1].get("sha"):

@@ -258,6 +258,18 @@ def test_the_plan_lint_last_froze_wins_over_an_earlier_run_reusing_its_ids(tmp_p
     assert f"plan: {nxt}" in r.stderr and tree(repo, r.stdout.strip()) == ["src/g.py"]
 
 
+def test_one_plan_spelled_two_ways_keeps_the_runs_chain(tmp_path):
+    repo = make_repo(tmp_path, plan_at="docs/plans/p.md")
+    write(repo, ".superlite/stable.json", json.dumps({"stable": ["T1", "T2"], "plan": "docs/plans/p.md"}))
+    write(repo, "src/a.py")
+    assert cp(repo, "T1", "--plan", str(repo / "docs" / "plans" / "p.md")).returncode == 0  # absolute $PLAN
+    write(repo, "src/b.py")
+    r = cp(repo, "T2")  # no --plan: stable.json's relative spelling
+    assert r.returncode == 0, r.stdout + r.stderr
+    st = json.loads((repo / ".superlite" / "checkpoints.json").read_text(encoding="utf-8"))
+    assert [e["task"] for e in st["entries"]] == ["T1", "T2"]
+
+
 def test_no_plan_with_the_task_asks_for_plan(tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "src/a.py")

@@ -330,7 +330,7 @@ def save_checkpoint(tid, title, files, plan):  # O(files) + git spawns
     A temporary index holds the parent's tree plus the owned files, so HEAD, the branch,
     the user's index and the working tree are not touched. The ref is refs/superlite/<run>/<Tn>."""
     st = load_state()
-    if not st or st.get("plan") != plan:
+    if not st or not cs.same_plan(st.get("plan"), plan):
         stem = Path(plan).stem if plan else "run"
         st = {"plan": plan, "run": f"{stem}-{date.today():%Y%m%d}", "head": head_sha(),
               "branch": git("symbolic-ref", "-q", "HEAD", check=False).stdout.strip(),
