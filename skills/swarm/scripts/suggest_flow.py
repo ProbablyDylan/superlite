@@ -70,7 +70,8 @@ def project_state(root=".") -> str:  # O(n)
     r = Path(root)
     row = _session_row(r)
     if row is not None:
-        if session_hud.run_of(row) == "open" and (r / state.DIR_NAME / "orchestrator.json").is_file():
+        if session_hud.run_of(row) == "open" and (r / state.DIR_NAME / "orchestrator.json").is_file() \
+                and not run_idle.idle_closed(r / state.DIR_NAME):
             return RUNNING
     elif (r / state.DIR_NAME / "orchestrator.json").is_file() and (r / "docs" / "plans").is_dir() \
             and not run_idle.closed(r / state.DIR_NAME):

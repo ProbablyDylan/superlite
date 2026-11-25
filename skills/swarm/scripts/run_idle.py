@@ -3,13 +3,13 @@
 
     run_idle.py [DIR]        DIR: the project (default .)
 
-A run counts as on while a run marker (stable.json, prime.md, pool.json) is newer than run.finished (written by
+A run counts as on while a run marker (stable.json, prime.md, pool.json, dispatch.json) is newer than run.finished (written by
 `superlite-cli finish`) and run.idle (written here). Users who never run finish leave a run on for days: the hooks keep
 treating it as live and the budget's clock keeps counting. The session-start hook calls this when a run is on; when the
-newest run file (the markers, progress.md, metrics.jsonl) is older than RUN_IDLE_H hours
+newest run file (the markers, progress.md) is older than RUN_IDLE_H hours
 (SUPERLITE_RUN_IDLE_H, default 6), it writes run.idle and prints one line. Nothing is moved or deleted: the run's files
-stay for its report, topics parks (not archives) it, and the next dispatch, lint --stable or build_prime rewrites a
-marker, which makes the run live again (plan lint --stable always rewrites stable.json). Library: idle_since(sl) -> the last activity epoch, or None. Stdlib only.
+stay for its report, topics parks (not archives) it, and the next dispatch (dispatch.json), lint --stable or build_prime
+rewrites a marker, which makes the run live again. Library: idle_since(sl) -> the last activity epoch, or None. Stdlib only.
 """
 import os
 import sys
@@ -20,14 +20,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import state  # noqa: E402
 
-MARKERS = ("stable.json", "prime.md", "pool.json")
-ACTIVITY = MARKERS + ("progress.md", "metrics.jsonl")  # not incidents.jsonl: a hook logs its own blocks there
+MARKERS = ("stable.json", "prime.md", "pool.json", "dispatch.json")  # topics.MARKERS, the hooks' lists: change together
+ACTIVITY = MARKERS + ("progress.md",)  # not metrics.jsonl or incidents.jsonl: any agent or hook block writes those
 IDLE = "run.idle"
 
 
 def idle_hours() -> float:
     try:
-        return max(0.0, float(os.environ.get("SUPERLITE_RUN_IDLE_H", "6")))
+        return max(1.0, float(os.environ.get("SUPERLITE_RUN_IDLE_H", "6")))  # never 0: a compact must not close a run
     except ValueError:
         return 6.0
 
@@ -54,6 +54,12 @@ def closed(sl: Path) -> bool:
     return closed_at(sl) > 0 and not is_on(sl)
 
 
+def idle_closed(sl: Path) -> bool:
+    """Closed by the idle rule (run.idle at least as new as run.finished), not by finish."""
+    idle = _mtime(sl / IDLE)
+    return idle is not None and closed(sl) and idle >= (_mtime(sl / "run.finished") or 0.0)
+
+
 def idle_since(sl: Path, now: float | None = None) -> float | None:
     """The last activity time when the run is on and idle past the limit, else None."""
     if not is_on(sl):
@@ -74,7 +80,7 @@ def close_if_idle(root: Path, now: float | None = None) -> str:
     except OSError:
         return ""
     return (f"superlite: the last build run was idle since {when}, so it no longer counts as running "
-            f"(nothing removed; the next plan lint --stable or agent assignment reopens it)")
+            f"(nothing removed; the next dispatch reopens it)")
 
 
 if __name__ == "__main__":

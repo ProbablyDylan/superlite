@@ -225,7 +225,7 @@ sd="$proj/.superlite"
 # .superlite/run.idle (written by run_idle.py at session start once the run sat idle for hours; nobody finished it).
 # The markers stay after a run for its report; the next run rewrites them, which makes them newer again.
 active=0
-for mk in "$sd/stable.json" "$sd/prime.md" "$sd/pool.json"; do
+for mk in "$sd/stable.json" "$sd/prime.md" "$sd/pool.json" "$sd/dispatch.json"; do
   [ -f "$mk" ] && [ "$mk" -nt "$sd/run.finished" ] && [ "$mk" -nt "$sd/run.idle" ] && { active=1; break; }
 done
 

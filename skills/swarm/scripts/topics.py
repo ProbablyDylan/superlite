@@ -25,7 +25,7 @@ import state  # noqa: E402
 TOPIC = "topic.txt"
 PARKED = "parked"
 ARCHIVE = "archive"
-MARKERS = ("stable.json", "prime.md", "pool.json")
+MARKERS = ("stable.json", "prime.md", "pool.json", "dispatch.json")  # dispatch rewrites dispatch.json: a resumed build reopens the run
 # Not run state: they describe the project, or hold other runs.
 KEEP = set(R.STATIONARY) | set(run_archive.KEEP) | {TOPIC, "setup.done", "probes", "history.jsonl", "__pycache__"}
 

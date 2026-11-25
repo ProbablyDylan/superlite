@@ -76,7 +76,7 @@ fi
 # A run nobody finished: once it sat idle for hours, run_idle.py writes .superlite/run.idle so the hooks stop treating
 # it as live (one spawn, only while a run marker is newer than run.finished and run.idle).
 idle_line=""; run_on=0
-for mk in .superlite/stable.json .superlite/prime.md .superlite/pool.json; do
+for mk in .superlite/stable.json .superlite/prime.md .superlite/pool.json .superlite/dispatch.json; do
   if [ -f "$mk" ] && [ "$mk" -nt .superlite/run.finished ] && [ "$mk" -nt .superlite/run.idle ]; then
     idle_line="$("$py" "${PLUGIN_ROOT}/skills/swarm/scripts/run_idle.py" . 2>/dev/null || true)"
     [ -z "$idle_line" ] && run_on=1
@@ -92,7 +92,9 @@ state="empty folder"
 shopt -s nullglob dotglob
 entries=(./*)
 hud_first="${hud_line%%$'\n'*}"
-if [[ $hud_first == *' | run:open'* ]] && [ -f .superlite/orchestrator.json ]; then
+idle_closed=0
+[ "$run_closed" = 1 ] && [ -f .superlite/run.idle ] && [ ! .superlite/run.finished -nt .superlite/run.idle ] && idle_closed=1
+if [[ $hud_first == *' | run:open'* ]] && [ -f .superlite/orchestrator.json ] && [ "$idle_closed" = 0 ]; then
   state="run in progress"
 elif [[ $hud_first == *' | run:'* ]]; then
   state="existing code"

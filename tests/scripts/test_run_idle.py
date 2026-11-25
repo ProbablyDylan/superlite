@@ -7,7 +7,7 @@ import time
 
 from test_block_coordinator_edits import run as pre_tool
 from test_plan_tools import SCRIPTS
-from test_session_run_state import _start, hub  # noqa: F401  (hub: fixture)
+from test_session_run_state import _start, hub, reg, row  # noqa: F401  (hub: fixture)
 
 sys.path.insert(0, str(SCRIPTS))
 import budget  # noqa: E402
@@ -86,8 +86,8 @@ def test_budget_counts_this_runs_working_time_only():
     old = [agent("a", now - 10 * 24 * H, now - 10 * 24 * H + 600)]  # ten days ago: another run
     cur = [agent("b", now - 1800, now - 1200), agent("c", now - 800, now - 400),  # 400 s pause: capped at 300
            agent("d", now - 700, now - 500)]  # inside c
-    el, start = budget.run_window(old + cur, now)
-    assert el == 600 + metrics.GAP_CAP_S + 400 and start == now - 1800
+    el, cost_from = budget.run_window(old + cur, now)
+    assert el == 600 + metrics.GAP_CAP_S + 400 and cost_from == now - 10 * 24 * H + 600  # planning turns after it count
     lost = agent("e", now - 9 * H)  # never stopped, nine hours ago: its stop was lost
     assert budget.run_window(cur + [lost], now)[0] == el
     assert budget.run_window(cur + [agent("f", now - 100)], now)[0] == el + metrics.GAP_CAP_S + 100  # still running
@@ -109,3 +109,35 @@ def test_coordinator_cost_scoped_to_the_run_and_newest_session(tmp_path):
     assert metrics.session_transcript(sl) == str(new)
     since = metrics._ts({"timestamp": "2026-11-22T10:03:00Z"})
     assert metrics.coordinator_record(sl)["turns"] == 3 and metrics.coordinator_record(sl, since=since)["turns"] == 2
+
+
+def test_a_reused_agents_idle_time_between_tasks_is_not_work():
+    now = 1_000_000.0
+    a = agent("a", now - 30 * H, now - 60)
+    a["segments"] = [{"first": now - 30 * H, "last": now - 30 * H + 600}, {"first": now - 3600, "last": now - 60}]
+    el, cost_from = budget.run_window([a], now)
+    assert el == 3600 - 60 and cost_from == now - 30 * H + 600  # 29 h idle: the earlier task was another run
+
+
+def test_idle_limit_has_a_floor(monkeypatch):
+    monkeypatch.setenv("SUPERLITE_RUN_IDLE_H", "0")
+    assert run_idle.idle_hours() == 1.0
+
+
+def test_a_resumed_build_reopens_on_its_next_dispatch(tmp_path):
+    sl = run_dir(tmp_path, hours=8)
+    run_idle.close_if_idle(tmp_path)
+    assert run_idle.idle_closed(sl)
+    (sl / "dispatch.json").write_text("{}")  # dispatch rewrites it every wave
+    assert run_idle.is_on(sl) and not run_idle.idle_closed(sl)
+
+
+def test_a_registered_open_session_with_an_idle_closed_run_is_existing_code(hub):  # noqa: F811
+    sl = hub / ".superlite"
+    (sl / "orchestrator.json").write_text("{}")
+    reg(hub, [row(hub, run="open")], "demo")
+    (sl / "pool.json").write_text("{}")
+    assert "Project state: run in progress." in _start(hub)
+    age(sl / "pool.json", 9)
+    assert "Project state: existing code." in _start(hub)
+    assert suggest_flow.project_state(str(hub)) == suggest_flow.EXISTING

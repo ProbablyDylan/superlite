@@ -339,11 +339,11 @@ def coordinator_record(sl_dir, prices=None, since: float = 0.0) -> dict | None: 
 
 def agents_cost(sl_dir, prices=None, since: float = 0.0) -> float:  # O(M + B)
     """Cost of every agent segment in metrics.jsonl, including ones not mapped to a plan task; with `since` (epoch s),
-    only agents launched at or after it."""
+    only segments that ended after it (a reused agent's later tasks count, its earlier ones do not)."""
     prices = prices or load_prices()
     return sum(cost_of(s["tok"], prices.get(family(s["model"]) or family(a["type"]) or "sonnet") or prices["sonnet"])
                for a in agent_records(Path(sl_dir)) for s in a["segments"]
-               if not since or (a.get("first_abs") or (a.get("start_ms") or 0) / 1000.0) >= since)
+               if not since or (s.get("last") or s.get("first") or 0) > since)
 
 
 def reconcile(sl_dir, stream_log, prices=None) -> dict:  # O(M + B + log)

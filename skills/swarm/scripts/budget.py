@@ -24,7 +24,6 @@ import run_idle  # noqa: E402
 import state  # noqa: E402
 
 WARN_AT = 0.70
-RUN_BREAK_S = 6 * 3600  # no agent working for this long: the earlier work was another run (run_idle's default)
 
 
 def header_budget(plan) -> float | None:  # O(C)
@@ -41,32 +40,39 @@ def checkpointed(sl: Path) -> set:  # O(ledger)
 
 
 def run_window(agents: list, now: float, since: float = 0.0) -> tuple[float, float]:  # O(A log A)
-    """Working seconds of this run: the union of agent spans (a recent unstopped agent runs to now) after `since` (the last
-    finish or idle close). A pause between spans counts up to metrics.GAP_CAP_S; a pause over RUN_BREAK_S (the
-    user left) starts the count again, so an unfinished earlier run is not added in. Returns (seconds, run start)."""
+    """This run's working seconds and the time its cost counts from. Spans are each agent's task segments (a reused
+    agent's idle time between tasks is not work; without segments, launch to stop, and a recent unstopped agent runs
+    to now), clipped to after `since` (the last finish or idle close). A pause between spans counts up to
+    metrics.GAP_CAP_S; a pause over the idle limit (the user left) starts the count again. Cost counts from `since`,
+    or from the end of the work before that pause, so this run's planning turns stay in and an earlier run's do not.
+    An agent reused now for a new task has no segment yet: its current work shows once it stops."""
     import metrics
+    brk = run_idle.idle_hours() * 3600
     spans = []
     for a in agents:
-        s = a["first_abs"] if a.get("first_abs") else (a["start_ms"] or 0) / 1000.0
-        if not s:
-            continue
-        if a.get("complete") and a.get("stop_ms"):
-            e = a["stop_ms"] / 1000.0
-        else:  # still running, unless it started so long ago that its stop was lost (a closed session)
-            e = now if now - s <= RUN_BREAK_S else s
-        s, e = max(s, since), min(max(s, e), now)
-        if e > s:
-            spans.append((s, e))
-    total, end, start = 0.0, None, since
+        segs = [(x["first"], x["last"]) for x in a.get("segments") or [] if x.get("first") is not None and x.get("last") is not None]
+        if not segs:
+            s = a["first_abs"] if a.get("first_abs") else (a.get("start_ms") or 0) / 1000.0
+            if not s:
+                continue
+            if a.get("complete") and a.get("stop_ms"):
+                segs = [(s, a["stop_ms"] / 1000.0)]
+            else:  # still running, unless it started so long ago that its stop was lost (a closed session)
+                segs = [(s, now if now - s <= brk else s)]
+        for s, e in segs:
+            s, e = max(s, since), min(e, now)
+            if e > s:
+                spans.append((s, e))
+    total, end, cost_from = 0.0, None, since
     for s, e in sorted(spans):
-        if end is None or s - end > RUN_BREAK_S:
-            total, start = 0.0, s
-        elif s > end:
+        if end is not None and s - end > brk:
+            total, cost_from = 0.0, end
+        elif end is not None and s > end:
             total += min(metrics.GAP_CAP_S, s - end)
         if end is None or e > end:
-            total += e - max(s, end if end is not None and end > s else s)
+            total += e - (max(s, end) if end is not None else s)
             end = e
-    return total, start
+    return total, cost_from
 
 
 def compute(plan_path, sl_dir=state.DIR_NAME, now=None) -> dict:  # O(M + B + n*(n + e))
@@ -80,9 +86,9 @@ def compute(plan_path, sl_dir=state.DIR_NAME, now=None) -> dict:  # O(M + B + n*
     starts = [a["first_abs"] if a.get("first_abs") else a["start_ms"] / 1000.0 for a in agents if a.get("first_abs") or a["start_ms"]]
     now = now if now is not None else time.time()
     wall = max(0.0, now - min(starts)) if starts else 0.0  # from the first agent ever logged: in-flight offsets only
-    elapsed, t_run = run_window(agents, now, run_idle.closed_at(sl))
-    co = metrics.coordinator_record(sl, since=t_run)  # this run's turns only
-    agents_usd = metrics.agents_cost(sl, since=t_run)  # this run's agents only
+    elapsed, t_cost = run_window(agents, now, run_idle.closed_at(sl))
+    co = metrics.coordinator_record(sl, since=t_cost)  # this run's turns only
+    agents_usd = metrics.agents_cost(sl, since=t_cost)  # this run's agent segments only
     co_usd = co["cost_usd"] if co else 0.0
     spent = agents_usd + co_usd  # coordinator + agents
     args = pt.build_parser().parse_args(["schedule", "--plan", str(plan_path)])
