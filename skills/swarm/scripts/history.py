@@ -19,7 +19,7 @@ ROW SCHEMA (v1), one JSON object per line:
   cost_usd, tool_calls, first_time_pass (true|false|null), rework_s, rework_cost, pred_min,
   phase ("proto" | "build"; absent on older rows; `run` is the run archive's id), run_id (feature run id or null), sandbox
   (repo-relative open sandbox or null), repository (hub checkout path).
-  timing ("active": duration_s and rework_s are working time; absent on older rows, which measured wall time from
+  timing ("active": duration_s is working time; "wall" when metrics had no timestamped transcript; absent on older rows, which measured wall time from
   the agent's first to last message and count idle waits, so the predictor's history fit skips them).
 Recording the same (repository, run, task) twice is a no-op unless its outcome (first_time_pass, rework_s, rework_cost, status, findings) changed, then the new row is appended and the last row wins; stats and fits read through unique_rows (content duplicates count once per repository).
 STATS (stats.json): {v, updated, rows, bands: {band: S}, tiers: {tier: S}, bands_by_tier: {tier|band: S}} with
@@ -220,9 +220,6 @@ def predicted_flags(plan, args=None) -> dict:  # O(n*(n + e))
     return out
 
 
-ACTIVE_TIMING = "active"  # duration_s counts working time only; rows without it were wall time and inflated by idle agents
-
-
 def run_rows(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(M + B + n*r)
     """Rows for this run from metrics.jsonl, the plan, routing and the prime files."""
     import metrics
@@ -256,7 +253,7 @@ def run_rows(plan_path, sl_dir=state.DIR_NAME, run_id=None) -> list:  # O(M + B 
                      "tokens": {"in": tk["in"], "out": tk["out"], "cache_read": tk["cache_read"], "cache_write": tk["cache_write"]},
                      "cost_usd": r["cost_usd"], "tool_calls": r["tool_calls"], "first_time_pass": r["first_time_pass"],
                      "rework_s": r["rework_s"], "rework_cost": r["rework_cost"], "pred_min": f.get("pred_min"),
-                     "timing": ACTIVE_TIMING})
+                     "timing": r.get("timing")})
     return rows
 
 

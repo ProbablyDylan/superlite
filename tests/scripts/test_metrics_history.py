@@ -416,3 +416,30 @@ def test_task_time_skips_idle_waits_and_caps_one_gap(tmp_path):
     assert [s["tid"] for s in segs] == ["T1"]
     assert segs[0]["active"] == 20 + 30 + metrics.GAP_CAP_S + 30 + 40
     assert segs[0]["last"] - segs[0]["first"] > 5 * 3600  # wall time, still kept for the schedule
+
+
+def test_wall_clock_fallbacks_are_tagged_wall_not_active(tmp_path):
+    """No transcript (hook times only) or a transcript with no timestamps: duration is wall time, never 0, and the row
+    is tagged `timing: wall` so the predictor's history fit skips it."""
+    sl = tmp_path / ".superlite"
+    sl.mkdir()
+    bare = tmp_path / "bare.jsonl"
+    bare.write_text("".join(json.dumps(x) + "\n" for x in [
+        {"role": "user", "message": {"role": "user", "content": "Task T2: go"}},
+        {"role": "assistant", "message": {"role": "assistant", "id": "m1", "model": SONNET, "content": "Status: DONE"}}]),
+        encoding="utf-8")
+    t0 = 1_700_000_000_000
+    ev = [{"ev": "launch", "t": t0, "agent_id": "a", "type": "superlite:implementer", "model": "sonnet", "desc": "T1 x"},
+          {"ev": "stop", "t": t0 + 3_600_000, "agent_id": "a", "type": "superlite:implementer", "transcript": "", "last": "Status: DONE"},
+          {"ev": "launch", "t": t0, "agent_id": "b", "type": "superlite:implementer", "model": "sonnet", "desc": "T2 x"},
+          {"ev": "stop", "t": t0 + 600_000, "agent_id": "b", "type": "superlite:implementer", "transcript": str(bare), "last": "Status: DONE"}]
+    (sl / "metrics.jsonl").write_text("\n".join(json.dumps(r) for r in ev) + "\n", encoding="utf-8")
+    rows = {r["task"]: r for r in json.loads(run(METRICS, "--dir", sl, "--json", cwd=tmp_path).out)}
+    assert rows["T1"]["duration_s"] == 3600.0 and rows["T1"]["timing"] == "wall"
+    assert rows["T2"]["duration_s"] == 600.0 and rows["T2"]["timing"] == "wall"
+
+
+def test_transcript_timed_rows_are_tagged_active(tmp_path):
+    p = mech_plan(tmp_path, 2)
+    setup_run(tmp_path, p)
+    assert {r["timing"] for r in records(tmp_path, p).values()} == {"active"}
