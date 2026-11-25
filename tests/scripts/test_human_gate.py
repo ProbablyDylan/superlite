@@ -355,7 +355,7 @@ def test_reply_does_not_approve(human, prompt):
 
 
 def test_reply_inactive_states_write_nothing(tmp_path):
-    for state in ("ai", "approved", "none"):
+    for state in ("ai", "none"):
         d = tmp_path / state
         d.mkdir()
         make(d, state)
@@ -365,6 +365,23 @@ def test_reply_inactive_states_write_nothing(tmp_path):
     d.mkdir()
     reply(d, "yes approve")
     assert not (d / ".superlite").exists()
+
+
+def test_leftover_approval_does_not_hide_the_next_plans_reply(tmp_path):
+    """Dorado 11-04/11-08: an earlier plan's approval was still on file, the hook stopped recording, and the human's
+    'Go ahead and proceed.' for the next plan was refused with 'no human approval reply since the plan was written'."""
+    import sys
+    proj = make(tmp_path, "approved")
+    review = proj / "docs" / "next.md"
+    review.parent.mkdir()
+    review.write_text("# next plan\n", encoding="utf-8")
+    old = time.time() - 60
+    os.utime(review, (old, old))
+    reply(proj, "Go ahead and proceed.")
+    assert [x["approves"] for x in lines(proj)] == [True]
+    cp = subprocess.run([sys.executable, str(ROOT / "skills" / "swarm" / "scripts" / "orchestrator.py"), "approve",
+                         "--review", str(review)], capture_output=True, text=True, cwd=str(proj))
+    assert cp.returncode == 0, cp.stdout + cp.stderr
 
 
 def test_reply_appends_and_escapes(human):

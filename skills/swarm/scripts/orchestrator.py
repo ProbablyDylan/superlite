@@ -12,7 +12,7 @@ gated (existing runs behave as before). `--ruling` on `set ai` also appends a `R
 (for a headless run where no human can answer).
 In human mode `approve` needs `--review PATH` (the plain-language review plan; refused without it, exit 2; a missing file exit 2)
 and evidence of a real human reply: `.superlite/human-replies.jsonl` (written only by the UserPromptSubmit hook, one
-{"t": epoch ms, "approves": bool, "text": ...} per human prompt while unapproved) must hold a line whose t is
+{"t": epoch ms, "approves": bool, "text": ...} per human prompt in human mode, approved or not) must hold a line whose t is
 later than the review file's modification time, else exit 3 with a BLOCKED line. The coordinator sends `approve` when it
 understands that reply as approval; the hook's phrase flag does not decide. The path and sha256 are recorded. AI mode never
 needs `approve`. Feature flow: in human mode, while `.superlite/feature.json` (written by `superlite-cli proto`) has status tryout, the same
@@ -193,7 +193,8 @@ def main(argv=None):
     st.add_argument("--review", help="review plan path: status says whether a reply newer than it approves")
     for p in (s, a_, st):
         p.add_argument("--plan", help=f"plan path (locates {_dir_name()}); default ./{_dir_name()}")
-    a = ap.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    a = ap.parse_args(argv or ["status"])  # bare: status, not a usage error
     if a.cmd == "set":
         write_state(a.plan, {"mode": a.mode, "approved": a.mode == "ai", "by": a.by, "time": now()})
         (sl_dir(a.plan) / "run.finished").unlink(missing_ok=True)  # a new run: its markers count as active again

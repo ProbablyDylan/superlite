@@ -204,6 +204,6 @@ def test_reply_hook_records_while_the_tryout_waits(tmp_path):
     a, b, c = lines(p)
     assert a["approves"] is True and b["approves"] is True and c["approves"] is False
     (tmp_path / "q").mkdir()
-    q = feature(tmp_path / "q", "human", True, "approved")  # nothing waits on the human: nothing is recorded
+    q = feature(tmp_path / "q", "human", True, "approved")  # human mode records every reply, approved or not
     reply(q, "it works")
-    assert lines(q) == []
+    assert [x["approves"] for x in lines(q)] == [True]

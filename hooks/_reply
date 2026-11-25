@@ -1,6 +1,5 @@
-# Sourced by hooks/prompt: while a human-orchestrator run is unapproved (.superlite/orchestrator.json
-# has mode human and approved false), or a feature-flow try-out waits for the human (mode human and
-# .superlite/feature.json has status tryout), append one line per human prompt to
+# Sourced by hooks/prompt: in human-orchestrator mode (.superlite/orchestrator.json has mode human),
+# approved or not (a leftover approval, a feature-flow try-out), append one line per human prompt to
 # <project>/.superlite/human-replies.jsonl:
 #   {"t":<epoch ms>,"approves":true|false,"text":"<first 160 chars of the prompt>"}
 # approves is true when the prompt expresses approval in any common way (approve, yes, yeah, yep,
@@ -31,14 +30,9 @@ record_reply() {
 [ -f "$sd/orchestrator.json" ] || return 0
 IFS= read -r -d '' oj < "$sd/orchestrator.json"
 re_human='"mode"[[:space:]]*:[[:space:]]*"human"'
-re_unappr='"approved"[[:space:]]*:[[:space:]]*false'
 [[ $oj =~ $re_human ]] || return 0
-if ! [[ $oj =~ $re_unappr ]]; then
-  [ -f "$sd/feature.json" ] || return 0
-  IFS= read -r -d '' fj < "$sd/feature.json"
-  re_tryout='"status"[[:space:]]*:[[:space:]]*"tryout"'
-  [[ $fj =~ $re_tryout ]] || return 0
-fi
+# Every human prompt counts, approved or not: a leftover approval of an earlier plan must not hide the reply
+# that approves the next one (`orchestrator approve` takes only replies newer than the review plan file).
 
 pjstr prompt; text="$REPLY"
 # bash 3.2 (stock macOS) has neither ${var,,} nor $'\u': tr, and the curly quotes as UTF-8 bytes.
