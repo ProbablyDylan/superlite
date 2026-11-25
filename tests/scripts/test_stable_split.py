@@ -381,3 +381,16 @@ def test_undrawable_graph_fails_open(tmp_path):
     assert _graph_block(cp) is None
     assert "graph: not drawn (" in cp.err
     assert cp.out.rstrip().splitlines()[-1].startswith("DISPATCH NOW: ")
+
+
+def test_frozen_is_a_note_under_guard_light(tmp_path, monkeypatch):
+    """A stale earlier run's dispatch record must not block a new plan when the user runs guard light."""
+    monkeypatch.setenv("SUPERLITE_GUARD", "light")
+    p = make_plan(tmp_path, [{"id": "T1", "time": 2, "title": "first"}, {"id": "T2", "time": 2}])
+    pt("lint", "--stable", "--plan", p)
+    _pool(tmp_path, "T1")
+    p = make_plan(tmp_path, [{"id": "T1", "time": 3, "title": "first reworded"}, {"id": "T2", "time": 2}])
+    cp = pt("lint", "--stable", "--plan", p)
+    assert cp.returncode == 0, cp.both
+    assert "NOTE: FROZEN: T1 block changed after dispatch" in cp.out and "(info, guard light)" in cp.out
+    assert "PLAN: FROZEN" not in cp.out and _log(tmp_path)[-1]["frozen"] == 0

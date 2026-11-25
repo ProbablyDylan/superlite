@@ -13,6 +13,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import base  # noqa: E402
+import guard  # noqa: E402
 import plan_tools as pt  # noqa: E402
 import proto_lint  # noqa: E402
 from plan_schedule import (CTX_CEILING, DEFAULT_SIZE_BAND, ancestors, block_hash, chain_id, dispatched_tasks, edge_notes,
@@ -34,7 +35,10 @@ PLACEHOLDERS = [
 DIAGRAM_TYPES = ("flowchart", "graph", "sequencediagram", "statediagram", "statediagram-v2", "gantt", "classdiagram",
                  "erdiagram", "journey", "pie", "mindmap", "timeline", "gitgraph", "quadrantchart", "requirementdiagram")
 SPEC_SKIP = {"overview", "introduction", "background", "goals", "non-goals", "glossary", "contents",
-             "table of contents", "references", "open questions", "appendix", "summary", "status"}
+             "table of contents", "references", "open questions", "appendix", "summary", "status",
+             # the structural sections of writing-specs/templates/feature-spec.md: no task builds them
+             "intent", "constraints", "done looks like", "decided", "diagrams", "left to the builder / plan",
+             "left to the builder", "left to the plan"}
 
 
 def check_diagram(block: FenceBlock) -> str | None:  # O(B) total, B = block chars
@@ -247,8 +251,8 @@ class _Lint:
         """Plan length and per-task context ceilings; returns the predictor coefficients."""
         plan, args = self.plan, self.args
         max_chars = getattr(args, "max_chars", DEFAULT_MAX_CHARS)
-        if len(plan.text) > max_chars:
-            self.add(f"plan is {len(plan.text)} chars, over the {max_chars} cap", scope="plan")
+        if len(plan.text) > max_chars:  # advice: a long plan costs every agent's prime, but never blocks
+            self.warnings.append(f"NOTE: plan is {len(plan.text)} chars, over the {max_chars} target; consider trimming")
         import predict
         models = predict.load_models(getattr(args, "models", None))
         coef = predict.load_coef(getattr(args, "coef", None))
@@ -509,6 +513,9 @@ def cmd_lint_stable(args) -> int:  # O(lint + n*k*s)
     old = base.read_json(out, {})
     sent = dispatched_tasks(run_dir)
     frozen, stable, fix = _freeze(plan, old, sent, run_dir, stable, fix, interfaces)
+    if frozen and guard.light():  # guard light: the run state informs, never blocks (it is often a stale earlier run)
+        warnings = list(warnings) + [f"NOTE: {f} (info, guard light)" for f in frozen]
+        frozen = []
     stable.sort(key=nkey)
     old_blocks = old.get("blocks") or {}
     blocks = {t: (old_blocks[t] if t in sent and t in old_blocks else block_hash(plan.by_id[t]))

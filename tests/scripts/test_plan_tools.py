@@ -406,7 +406,7 @@ def test_lint_flags_bad_graph_and_diagram(tmp_path):
 def test_lint_size_caps(tmp_path):
     p = make_plan(tmp_path, [{"id": "T1", "time": 2, "ctx": 85}])
     cp = pt("lint", "--plan", p, "--max-chars", 100)
-    assert "over the 100 cap" in cp.out
+    assert "NOTE: plan is" in cp.out and "over the 100 target" in cp.out and "ISSUE: plan is" not in cp.out
     assert "T1: Est. context 85k is over the 80k ceiling" in cp.out
 
 
@@ -650,3 +650,13 @@ def test_lint_context_ceiling_uses_predicted_when_features_present(tmp_path):
     cp = pt("lint", "--plan", p)
     assert "ceiling" not in cp.out and "NOTE: T1 states Est. context 85k" in cp.out
     assert "T1: Est. context 85k is over the 80k ceiling" in pt("lint", "--plan", p, "--stated").out
+
+
+def test_lint_skips_the_spec_templates_structural_sections(tmp_path):
+    spec = tmp_path / "spec.md"
+    spec.write_text("# S\n\n## Intent\nx\n## Goals\nx\n## Constraints\nx\n## Done looks like\nx\n## Decided\nx\n"
+                    "## Left to the builder / plan\nx\n## Diagrams\nx\n## Water routing\nx\n", encoding="utf-8")
+    cp = pt("lint", "--plan", make_plan(tmp_path, [{"id": "T1", "time": 2}]), "--spec", spec)
+    assert "SPEC section 'Water routing' has no task" in cp.out
+    for name in ("Intent", "Constraints", "Done looks like", "Decided", "Left to the builder / plan", "Diagrams"):
+        assert f"SPEC section '{name}'" not in cp.out
