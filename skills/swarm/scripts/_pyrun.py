@@ -1,7 +1,10 @@
 """Shared helpers for running pytest from the superlite scripts. Stdlib only.
 
-pytest_cmd(): command prefix that runs pytest. Uses the current interpreter when it can
-import pytest, else `uv run --no-project --with pytest python -m pytest`, else raises
+project_python(root): the interpreter with the project's dependencies (SUPERLITE_PROJECT_PYTHON, .venv/venv,
+`uv run python` with uv.lock), or None.
+
+pytest_cmd(root): command prefix that runs pytest. Uses the project's interpreter (project_python) when there is
+one with pytest available, else the current interpreter when it can import pytest, else `uv run --no-project --with pytest python -m pytest`, else raises
 PytestUnavailable with a clear message (`superlite-cli` may have fallen back to a bare
 `uv run --no-project python`, which has no pytest).
 
@@ -17,6 +20,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import base
 
@@ -29,7 +33,46 @@ def have_pytest():
     return importlib.util.find_spec("pytest") is not None
 
 
-def pytest_cmd():  # O(P) PATH search
+def _venv_python(root: Path) -> Path | None:  # O(1) stats
+    for d in (".venv", "venv"):
+        for exe in ("bin/python", "Scripts/python.exe"):
+            if (root / d / exe).is_file():
+                return root / d / exe
+    return None
+
+
+def _venv_has_pytest(py: Path) -> bool:  # O(site dirs) stats, no process
+    venv = py.parent.parent
+    return any(venv.glob("lib/python*/site-packages/pytest")) or (venv / "Lib" / "site-packages" / "pytest").is_dir()
+
+
+def project_python(root=".") -> list | None:  # O(P) PATH search
+    """The interpreter that has the PROJECT's dependencies, as a command prefix, or None for a project with none of
+    these: $SUPERLITE_PROJECT_PYTHON (a file, or a command such as `poetry run python`), else <root>/.venv or venv,
+    else `uv run python` when uv.lock exists and uv is on PATH. Superlite's own interpreter (sys.executable) runs the
+    scripts; it usually lacks the project's packages (numpy, ...), so project code never runs under it when this
+    finds one."""
+    env = os.environ.get("SUPERLITE_PROJECT_PYTHON", "").strip()
+    if env:
+        return [env] if os.path.isfile(env) else env.split()
+    r = Path(root).resolve()
+    py = _venv_python(r)
+    if py:
+        return [str(py)]
+    uv = shutil.which("uv")
+    if uv and (r / "uv.lock").is_file():
+        return [uv, "run", "python"]
+    return None
+
+
+def pytest_cmd(root="."):  # O(P) PATH search
+    """pytest under the project's interpreter (project_python) when it has one, else under superlite's own."""
+    proj = project_python(root)
+    venv = _venv_python(Path(root).resolve())
+    if proj and proj[1:] == ["run", "python"] and Path(proj[0]).stem == "uv":  # the project's env, plus pytest if it lacks one
+        return [proj[0], "run", "--with", "pytest", "python", "-m", "pytest"]
+    if proj and not (venv and proj == [str(venv)] and not _venv_has_pytest(venv)):  # a venv without pytest falls through
+        return [*proj, "-m", "pytest"]
     if have_pytest():
         return [sys.executable, "-m", "pytest"]
     uv = shutil.which("uv")

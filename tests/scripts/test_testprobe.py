@@ -140,11 +140,13 @@ SUSPECT = {"verdict": "spinning", "flat_s": 42.0, "cpu_pct": 97.0, "cpu_method":
 
 def test_summary_fields_are_additive_and_empty_for_a_quiet_run():
     assert tp.summary_fields(fake_result()) == {}
-    f = tp.summary_fields(fake_result(dict(SUSPECT)))
+    f = tp.summary_fields(fake_result(dict(SUSPECT), "timeout"))
     assert f["verdict"] == "SUSPECT HANG" and f["suspect_hang"]["verdict"] == "spinning"
     assert f["suspect_hang"]["flat_s"] == 42.0 and f["suspect_hang"]["test_file"] == "tests/markdown.test.ts"
     assert f["suspect_hang"]["line"].startswith("SUSPECT HANG: SPINNING tests/markdown.test.ts")
     assert "node.exe(10)" in f["suspect_hang"]["line"] and "infinite loop" in f["suspect_hang"]["line"]
+    slow = tp.summary_fields(fake_result(dict(SUSPECT)))  # quiet for a while, then finished on its own: no verdict
+    assert "verdict" not in slow and "suspect_hang" not in slow and slow["hang_cleared"]["verdict"] == "spinning"
     t = tp.summary_fields(fake_result(None, "timeout"))
     assert t["verdict"] == "TIMEOUT" and t["timeout_s"] == 9.0 and "suspect_hang" not in t
     both = tp.summary_fields(fake_result(dict(SUSPECT), "timeout"))

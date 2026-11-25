@@ -423,11 +423,15 @@ def run_watched(cmd, *, shell=False, env=None, cfg=None, expected_s=None, test_f
 
 
 def summary_fields(r):  # O(D) ADDITIVE summary fields; {} when the probe saw nothing (the summary keeps its old shape)
+    """A SUSPECT HANG verdict only for a run that was killed; a run that went quiet and then finished on its own
+    keeps the probe's reading as `hang_cleared`, with no verdict."""
     s = getattr(getattr(r, "probe", None), "suspect", None)
     if s is None and not getattr(r, "killed", None):
         return {}
     out = {}
-    if s is not None:
+    if s is not None and not r.killed:  # it went quiet, then finished by itself: a slow spell, not a hang
+        out.update(hang_cleared=dict(s, line=suspect_line(s, limit=r.probe.cfg["max_tree_listed"])))
+    elif s is not None:
         out.update(verdict="SUSPECT HANG", suspect_hang=dict(s, line=suspect_line(s, limit=r.probe.cfg["max_tree_listed"])))
     if r.killed == "timeout":
         out.update(timeout_s=round(r.elapsed, 1))
