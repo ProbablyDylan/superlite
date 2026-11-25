@@ -178,18 +178,30 @@ def read_probe_failures(probes: Path) -> list[Item]:  # O(R) total
         data = json.loads(f.read_text(encoding="utf-8"))
     except ValueError:
         return []
-    results = data.get("results", []) if isinstance(data, dict) else data
     groups: dict[tuple, int] = {}  # identical failures collapse into one item with a count
+    if isinstance(data, dict) and isinstance(data.get("failures"), list):  # probe_run: one group per root cause
+        for g in data["failures"]:  # a group probe_run logged as an incident is listed (and resolved) there, not twice
+            if isinstance(g, dict) and not g.get("incident"):
+                key = (str(g.get("category", "?")), str(g.get("kind") or g.get("exc") or "fail"),
+                       str(g.get("file") or "").replace("\\", "/"), int(g.get("line") or 0),
+                       str(g.get("detail") or g.get("probe") or "")[:200])
+                groups[key] = groups.get(key, 0) + max(1, int(g.get("count") or 1))
+        return _probe_items(groups)
+    results = data.get("results", []) if isinstance(data, dict) else data  # older flat list of probe rows
     for r in results if isinstance(results, list) else []:
         if not isinstance(r, dict) or str(r.get("status", "pass")).lower() in PASS_STATUSES:
             continue
         key = (str(r.get("category", "?")), str(r.get("status")), str(r.get("file", "")).replace("\\", "/"),
                int(r.get("line") or 0), str(r.get("detail") or r.get("message") or r.get("probe") or "")[:200])
         groups[key] = groups.get(key, 0) + 1
+    return _probe_items(groups)
+
+
+def _probe_items(groups: dict) -> list[Item]:  # O(groups)
     items: list[Item] = []
     for (cat, status, file, line, detail), n in groups.items():
         items.append(Item("probes", (3, cat, file, line),
-                          f"probe {cat} {status}: {file}:{line}" + (f"  (x{n})" if n > 1 else ""),
+                          f"probe {cat} {status}" + (f": {file}:{line}" if file else " (no project frame)") + (f"  (x{n})" if n > 1 else ""),
                           f"- {detail}" if detail else "", file, line))
     return items
 

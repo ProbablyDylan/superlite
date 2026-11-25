@@ -64,6 +64,18 @@ def test_probe_results_duplicates_collapse(tmp_path):
     assert len(got) == 1 and got[0].title.endswith("(x9)")
 
 
+def test_probe_run_failure_groups_are_read_and_logged_ones_not_repeated(tmp_path):
+    """probe_run writes failure groups under "failures" and logs each one as an incident (the group's "incident"
+    key): those are listed and resolved with the incidents, so only an unlogged group shows here."""
+    logged = {"category": "deep", "kind": "crash", "count": 66, "detail": "check_v2 expects a Layout",
+              "file": "src/a.py", "line": 86, "incident": {"file": "src/a.py", "line": 86}}
+    unlogged = {"category": "numeric", "kind": "hang", "count": 3, "detail": "slow parse", "file": None, "line": 0}
+    data = {"commit": "abc", "results": [], "failures": [logged, unlogged], "probes": []}
+    (tmp_path / "probe-results.json").write_text(json.dumps(data), encoding="utf-8")
+    got = rp.read_probe_failures(tmp_path)
+    assert [g.title for g in got] == ["probe numeric hang (no project frame)  (x3)"]
+
+
 # ---------------------------------------------------------------- resolved by a later event
 
 def test_later_run_tests_verified_resolves():
