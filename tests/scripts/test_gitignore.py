@@ -157,10 +157,10 @@ def test_checkpoint_never_blocks_on_the_plans_ignore_entries(tmp_path):
     write(tmp_path, "data/app.sqlite")
     cp = run(COMMIT, "T1", "--plan", p, cwd=tmp_path)
     assert cp.returncode == 0, cp.both
-    write(tmp_path, "other-dir/a.dat")  # not listed: still blocks
+    write(tmp_path, "other-dir/a.dat")  # not listed: left out with a warning
     write(tmp_path, "src/slug.ts", "export const slugify = (t: string) => t + '';\n")
     again = run(COMMIT, "T1", "--plan", p, cwd=tmp_path)
-    assert again.returncode == 1 and "out-of-scope other-dir/a.dat" in again.out and "local-db" not in again.out
+    assert again.returncode == 0 and "out-of-scope other-dir/a.dat" in again.err and "local-db" not in again.both
 
 
 def test_ignored_matches_every_language_but_not_source():
@@ -181,10 +181,10 @@ def test_out_of_scope_incidents_are_one_row_per_top_level_directory(tmp_path):
     write(tmp_path, "docs/a.md")
     write(tmp_path, "docs/b.md")
     cp = run(COMMIT, "T1", "--plan", p, cwd=tmp_path)
-    assert cp.returncode == 1
-    out = cp.out.splitlines()
-    assert sum(ln.startswith("out-of-scope ") for ln in out) == 20 and "... and 8 more" in out  # 28 blocked files
-    assert any(ln.startswith("hint: 25 blocked files under thirdparty/") and "add it to .gitignore" in ln for ln in out)
+    assert cp.returncode == 0, cp.both  # T1's own files are saved; the strays only warn
+    out = cp.err.splitlines()
+    assert sum(ln.startswith("warning: out-of-scope ") for ln in out) == 20 and "warning: ... and 8 more" in out  # 28 left out
+    assert any(ln.startswith("hint: 25 out-of-scope files under thirdparty/") and "add it to .gitignore" in ln for ln in out)
     assert not any("under docs/" in ln and ln.startswith("hint") for ln in out)
     rows = [json.loads(ln) for ln in (tmp_path / ".superlite" / "incidents.jsonl").read_text(encoding="utf-8").splitlines()]
     by_file = {r["file"]: r for r in rows}

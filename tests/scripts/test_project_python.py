@@ -41,7 +41,7 @@ def test_uv_project_keeps_its_dependencies(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
     monkeypatch.setattr(_pyrun.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None)
     (tmp_path / "uv.lock").write_text("", encoding="utf-8")
-    assert _pyrun.pytest_cmd(tmp_path) == ["/bin/uv", "run", "--with", "pytest", "python", "-m", "pytest"]
+    assert _pyrun.pytest_cmd(tmp_path) == ["/bin/uv", "run", "--frozen", "--with", "pytest", "python", "-m", "pytest"]
     assert "--no-project" not in _pyrun.pytest_cmd(tmp_path)
 
 

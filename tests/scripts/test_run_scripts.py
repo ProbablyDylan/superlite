@@ -254,21 +254,21 @@ def test_checkpoint_never_moves_head(tmp_path):
     assert (repo / "src" / "a.py").read_text() == "X = 1\n"
 
 
-def test_commit_blocks_out_of_scope(tmp_path):
+def test_checkpoint_leaves_out_of_scope_files_out(tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "src/a.py", "X = 1\n")
     write(repo, "stray.txt", "oops\n")
     # src/b.py is another task's file: left alone, not reported
     before = commits(repo)
     r = commit(repo)
-    assert r.returncode == 1
-    assert "out-of-scope stray.txt" in r.stdout
-    assert "src/a.py" not in r.stdout
-    assert commits(repo) == before
+    assert r.returncode == 0, r.stdout + r.stderr  # a stray never refuses the checkpoint
+    assert "out-of-scope stray.txt" in r.stderr and "src/a.py" not in r.stderr
+    assert commits(repo) == before + 1
+    assert git(repo, "show", "--name-only", "--format=", r.stdout.strip()) == "src/a.py"
     assert git(repo, "diff", "--cached", "--name-only") == ""
     log = read_log(repo / ".superlite" / "incidents.jsonl")
     assert {e["file"] for e in log} == {"stray.txt"}
-    assert all(e["kind"] == "exception" and e["agent"] == "checkpoint" for e in log)
+    assert all(e["kind"] == "exception" and e["agent"] == "checkpoint" and e["resolution"] == "noted" for e in log)
 
 
 def test_commit_two_tasks_mid_build_leaves_other_tasks_files(tmp_path):
@@ -285,7 +285,7 @@ def test_commit_two_tasks_mid_build_leaves_other_tasks_files(tmp_path):
     assert git(repo, "show", "--name-only", "--format=", r.stdout.strip()) == "src/b.py"
 
 
-def test_checkpoint_skips_other_tasks_files_but_blocks_strays(tmp_path):
+def test_checkpoint_skips_other_tasks_files_and_leaves_strays_out(tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "src/a.py", "X = 1\n")
     write(repo, "src/b.py", "Y = 2\n")
@@ -293,13 +293,17 @@ def test_checkpoint_skips_other_tasks_files_but_blocks_strays(tmp_path):
     assert r.returncode == 0, r.stdout
     assert git(repo, "show", "--name-only", "--format=", r.stdout.strip()) == "src/a.py"
     assert "src/b.py" in git(repo, "status", "--porcelain", "--untracked-files=all")
-    write(repo, "stray.txt", "x")                          # owned by nobody still blocks
+    write(repo, "stray.txt", "x")                          # owned by nobody: left out with a warning
     write(repo, "src/c.py", "Z = 3\n")
-    assert commit(repo, "T3").returncode == 1
+    r3 = commit(repo, "T3")
+    assert r3.returncode == 0 and "out-of-scope stray.txt" in r3.stderr
+    assert git(repo, "show", "--name-only", "--format=", r3.stdout.strip()) == "src/c.py"
 
 
-def test_pytest_cmd_falls_back_to_uv_when_pytest_missing(monkeypatch):
+def test_pytest_cmd_falls_back_to_uv_when_pytest_missing(monkeypatch, tmp_path):
     import _pyrun
+    monkeypatch.chdir(tmp_path)  # no project environment here (no .venv, no uv.lock)
+    monkeypatch.delenv("SUPERLITE_PROJECT_PYTHON", raising=False)
     monkeypatch.setattr(_pyrun, "have_pytest", lambda: False)
     monkeypatch.setattr(_pyrun.shutil, "which", lambda n: "/x/uv")
     assert _pyrun.pytest_cmd() == ["/x/uv", "run", "--no-project", "--with", "pytest",
@@ -360,15 +364,16 @@ def test_commit_rejects_syntax_error(tmp_path):
 
 def test_commit_rejects_failing_import_and_accepts_package_import(tmp_path):
     repo = make_repo(tmp_path)
-    write(repo, "src/a.py", "import module_that_does_not_exist_xyz\n")
+    write(repo, "src/a.py", "import src.module_that_does_not_exist_xyz\n")  # the project's own package
     r = commit(repo)
     assert r.returncode == 1 and "import src/a.py:1" in r.stdout
     assert "ModuleNotFoundError" in r.stdout
     assert commits(repo) == 0
     write(repo, "src/a.py", "from src import b_helper\nVALUE = b_helper.V\n")
     write(repo, "src/b_helper.py", "V = 1\n")
-    # b_helper is not in T1's Owns -> out of scope; the import itself would pass
-    assert commit(repo).returncode == 1
+    # b_helper is not in T1's Owns -> left out with a warning; the import itself passes
+    r = commit(repo)
+    assert r.returncode == 0 and "out-of-scope src/b_helper.py" in r.stderr
     write(repo, "src/a.py", "import json\nVALUE = json.dumps(1)\n")
     (repo / "src" / "b_helper.py").unlink()
     r = commit(repo)
@@ -602,8 +607,9 @@ def test_commit_regression_dir_does_not_open_other_paths(tmp_path):
     write(repo, "tests/regression/test_probe_x.py", "def test_x():\n    assert True\n")
     write(repo, "tests/other.py", "pass\n")
     r = commit(repo, "T1")
-    assert r.returncode == 1 and "out-of-scope tests/other.py" in r.stdout
-    assert "regression" not in r.stdout
+    assert r.returncode == 0 and "out-of-scope tests/other.py" in r.stderr
+    assert "regression" not in r.stderr
+    assert "tests/other.py" not in git(repo, "show", "--name-only", "--format=", r.stdout.strip()).split()
 
 
 def test_run_tests_writes_summary_packet_can_read(tmp_path):

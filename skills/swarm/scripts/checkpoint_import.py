@@ -1,4 +1,19 @@
-"""Import-check driver for checkpointed Python modules. Stdlib only."""
+"""Import check for checkpointed Python modules, run on the project's interpreter. Stdlib only.
+
+check(files, dir_name, root) -> (errors, warnings), each [(file, line, msg)]. The driver runs under
+_pyrun.project_python(root) ($SUPERLITE_PROJECT_PYTHON, the project's venv, `uv run python`), else this interpreter;
+an interpreter that cannot start or crashes falls back to this one with a warning. A ModuleNotFoundError for a
+module that is not part of the project (not under the root, src/, a sandbox or the file's folder) is a warning:
+the project's dependencies may simply be missing here.
+"""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _pyrun  # noqa: E402
 
 IMPORT_DRIVER = r"""
 import importlib, importlib.util, json, os, sys, traceback
@@ -57,6 +72,42 @@ for rel in files:
         for fr in traceback.extract_tb(e.__traceback__):
             if os.path.abspath(fr.filename) == os.path.abspath(path):
                 line = fr.lineno
-        failures.append({"file": rel, "line": line, "error": f"{type(e).__name__}: {e}"[:150]})
+        third = False
+        if isinstance(e, ModuleNotFoundError) and e.name:
+            top = e.name.split(".")[0]
+            dirs = [root, os.path.join(root, "src"), os.path.dirname(os.path.abspath(path))] + sandbox_roots
+            third = not any(os.path.exists(os.path.join(d, top + ".py")) or os.path.isdir(os.path.join(d, top)) for d in dirs)
+        failures.append({"file": rel, "line": line, "error": f"{type(e).__name__}: {e}"[:150], "third_party": third})
 print(json.dumps(failures))
 """
+
+
+def _run(py, files, dir_name, root):  # O(m_py * import cost) + 1 process spawn
+    """The driver's failure list, or (None, why) when the interpreter cannot start, times out or prints no result."""
+    try:
+        r = subprocess.run([*py, "-I", "-c", IMPORT_DRIVER, root, dir_name, *files], capture_output=True, text=True,
+                           encoding="utf-8", timeout=120, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, str(e)[-150:]
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1]), ""
+    except (IndexError, ValueError):
+        return None, r.stderr.strip()[-150:]
+
+
+def check(files, dir_name, root="."):  # O(m_py * import cost) + 1-2 process spawns
+    if not files:
+        return [], []
+    py = _pyrun.project_python(root) or [sys.executable]
+    out, why = _run(py, files, dir_name, root)
+    notes = []
+    if out is None and py != [sys.executable]:
+        notes.append((files[0], 0, f"import check under {' '.join(py)} failed ({why}); checked with {sys.executable}"))
+        py = [sys.executable]
+        out, why = _run(py, files, dir_name, root)
+    if out is None:
+        return [(files[0], 0, f"import check crashed: {why}")], notes
+    errors = [(f["file"], f["line"], f["error"]) for f in out if not f.get("third_party")]
+    missing = [(f["file"], f["line"], f"{f['error']} (not part of the project; not installed for {' '.join(py)})")
+               for f in out if f.get("third_party")]
+    return errors, notes + missing

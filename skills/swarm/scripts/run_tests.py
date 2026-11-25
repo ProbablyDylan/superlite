@@ -223,17 +223,12 @@ def case_file(case):  # O(d) stats, O(d^2) path work (stats are uncached)
     cn = case.get("classname") or ""
     if re.search(r"[\\/]|\.(?:[jt]sx?|go|rs|cs)$", cn):  # a path-like classname (vitest, jest, go, cargo): use it as the file
         return cn.replace("\\", "/")
-    # pytest leaves classname empty for a collection error and puts the module's dotted path in name
-    return _dotted_py(cn) or (None if cn else _dotted_py(case.get("name") or "")) or case.get("name") or "unknown"
-
-
-def _dotted_py(dotted: str) -> str | None:  # O(d) stats
-    """The longest existing `a/b/c.py` prefix of a dotted name (`a.b.c.TestX`), else None. Empty parts are skipped:
-    Path("") is ".", and "." has no name to give a suffix to."""
-    parts = [x for x in dotted.split(".") if x]
+    parts = [x for x in (cn or case.get("name") or "").split(".") if x]  # pytest collection error: no classname, module in name
     while parts and not Path(*parts).with_suffix(".py").exists():
         parts.pop()
-    return Path(*parts).with_suffix(".py").as_posix() if parts else None
+    if parts:
+        return Path(*parts).with_suffix(".py").as_posix()
+    return case.get("name") or "unknown"
 
 
 def failure_line(case, text, fallback):  # O(len(text) + d)

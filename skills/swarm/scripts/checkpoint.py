@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Checkpoint one or more tasks: record only each task's Owns files, block anything else.
+"""Checkpoint one or more tasks: record each task's Owns files (plus any --include), warn about anything else.
 
-    checkpoint.py Tn [Tm ...] [--plan P] [--ledger .superlite/progress.md]
+    checkpoint.py Tn [Tm ...] [--include PATH ...] [--plan P] [--ledger .superlite/progress.md]
                   [--log .superlite/incidents.jsonl]
                   [--dispatch [--pool .superlite/pool.json] [--running T3] [--cap 10] [--batch N]]
 
@@ -12,16 +12,20 @@ cleared, `busy: false` and Tn in its `tasks`. `--dispatch` then prints `next:` a
 
 A checkpoint is a hidden shadow git object (never on HEAD, the branch or the user's index)
 stored under refs/superlite/<run>/<Tn>; its SHA is what the ledger, probes and seam checks
-use. `superlite-cli finish` deletes the refs at the end of the run.
+use; with something left out it also prints `checkpoint Tn <sha> saved ...` on stderr. `superlite-cli finish` deletes the refs at the end of the run.
 
-Steps: scope check (changes outside every task's Owns block the checkpoint and are logged as
-incidents; files another task owns are left out, silently), py_compile plus an import check
-on each touched .py file, checkpoint with the task title, append `- checkpoint Tn <sha>
+--plan defaults to the run's plan (checkpoint_scope.resolve_plan). `--include PATH` (repeatable; a file or folder)
+adds changed files outside Owns to the first task, even another task's (with a note).
+
+Steps: scope check (changes outside every task's Owns are left out with a warning on stderr and a noted
+incident, never refusing; files another task owns are left out, silently), py_compile plus an import check
+on each touched .py file under the project's interpreter (checkpoint_import.check; a missing third-party
+module only warns), checkpoint with the task title, append `- checkpoint Tn <sha>
 <title>` to the progress ledger, then launch in the background `superlite-cli probe_run
 --checkpoint SHA` and, for every seam of the task graph (`superlite-cli plan_tools taskgraph
 --format full`) with both sides now checkpointed, `superlite-cli pt_review contract --plan P
 --seam Ta,Tb --log LOG` (mismatches become incidents, a pass logs `verified`). Exits 1
-listing the problem files. Run it from the repository root.
+on syntax or import problems, or when nothing of the task changed. Run it from the repository root.
 
 Scope rules: `tests/regression/` (probe_run's `test_probe_*.py`) is owned by whichever task is
 being checkpointed. `.superlite/` is never staged and never blocks; `setup_exclude()` adds it
@@ -43,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import next_tasks as nt  # noqa: E402
 import base  # noqa: E402
 import checkpoint_import as ci  # noqa: E402
+import checkpoint_scope as cs  # noqa: E402
 import gitignore  # noqa: E402
 import sandbox  # noqa: E402
 import state  # noqa: E402
@@ -53,9 +58,6 @@ DEFAULT_LOG = f"{state.DIR_NAME}/incidents.jsonl"
 # so a late or missing .gitignore cannot block a task on node_modules, target, .venv ... (the plan's Ignore line joins in main).
 IGNORED_PARTS = tuple(dict.fromkeys((f"{state.DIR_NAME}/", "__pycache__/", *(e for e in gitignore.union_entries() if e.endswith("/") and "*" not in e))))
 PLAN_IGNORE: list[str] = []  # entries of the plan's `**Ignore:**` header line, set once in main
-OUT_OF_SCOPE_SHOWN = 20  # paths printed per blocked checkpoint
-HINT_DIR_FILES = 20  # more blocked files than this under one top-level directory: print the .gitignore hint
-INCIDENT_PATHS = 5  # paths named in each grouped incident
 SHARED_OWNS = ("tests/regression/",)  # generated probe regression tests: owned by the task being checkpointed
 # The ledger line for one saved task, `- checkpoint Tn <sha> <title>`; groups: task, sha, title.
 # Every ledger reader imports this one regex.
@@ -149,17 +151,8 @@ def syntax_errors(files):  # O(total size of m_py files)
     return errors
 
 
-def import_errors(files):  # O(m_py * import cost) + 1 process spawn (batched)
-    if not files:
-        return []
-    r = subprocess.run([sys.executable, "-I", "-c", ci.IMPORT_DRIVER, ".", state.DIR_NAME, *files],
-                       capture_output=True, text=True, encoding="utf-8", timeout=120,
-                       env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-    try:
-        out = json.loads(r.stdout.strip().splitlines()[-1])
-    except (IndexError, json.JSONDecodeError):
-        return [(files[0], 0, f"import check crashed: {r.stderr.strip()[-150:]}")]
-    return [(f["file"], f["line"], f["error"]) for f in out]
+def import_errors(files):  # O(m_py * import cost) + 1-2 process spawns; failures only (see checkpoint_import.check)
+    return ci.check(files, state.DIR_NAME)[0]
 
 
 def is_module(path):  # O(len path)
@@ -319,23 +312,6 @@ def log_incidents(log, task, items):  # O(k) + one append (no spawn in process)
                            for f, line, msg in items])
 
 
-def group_by_top_dir(files):  # O(m)
-    """{top-level directory: [paths]} in first-seen order; a file at the repo root is its own group."""
-    groups = {}
-    for f in files:
-        groups.setdefault(f.split("/", 1)[0] if "/" in f else f, []).append(f)
-    return groups
-
-
-def incident_row(key, files):
-    """(file, line, message) for one group: the path itself for a lone file, else `dir/` with the count and the first paths."""
-    msg = "change outside Owns blocked by checkpoint; nothing saved"
-    if len(files) == 1 and files[0] == key:
-        return key, 0, msg
-    first = ", ".join(files[:INCIDENT_PATHS])
-    return key + "/", 0, f"{msg}: {len(files)} files under {key}/, first {min(len(files), INCIDENT_PATHS)}: {first}"
-
-
 def head_sha():
     r = git("rev-parse", "--verify", "-q", "HEAD", check=False)
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -422,29 +398,25 @@ def checkpoint_one(a, tid, info, own_files):  # O(m*o + py size) + git spawns (s
         else:
             other = other + [".gitignore"]
     mine, out_of_scope = [], []
-    for f in changed_files(claims(owns)):
-        if f in own_files and not nt.owns_match(f, owns):
-            continue
-        if tid == "T0" and nt.owns_match(f, other):  # Wave 0 globs never take another task's file
-            continue
-        if nt.owns_match(f, owns):
+    extra = cs.include_match(a.include if tid == a.task[0] else [])  # --include: the caller named these files
+    claimed = claims(owns)
+    for f in changed_files(lambda path: claimed(path) or extra(path)):
+        if extra(f) and not hard_ignored(f):
             mine.append(f)
-        elif nt.owns_match(f, other):
-            continue  # another task's file, built in parallel in this tree: leave it alone
-        else:
+            owner = next((t for t, i in info.items() if t != tid and nt.owns_match(f, i["owns"])), None)
+            if owner:
+                print(f"note: --include {f} is owned by {owner}; saved with {tid} as asked", file=sys.stderr)
+        elif (f in own_files and not nt.owns_match(f, owns)) or (tid == "T0" and nt.owns_match(f, other)):
+            continue  # run bookkeeping; Wave 0 globs never take another task's file
+        elif nt.owns_match(f, owns):
+            mine.append(f)
+        elif not nt.owns_match(f, other):  # another task's file, built in parallel in this tree: left alone
             out_of_scope.append(f)
-
-    if out_of_scope:
-        for f in out_of_scope[:OUT_OF_SCOPE_SHOWN]:
-            print(f"out-of-scope {f}")
-        if len(out_of_scope) > OUT_OF_SCOPE_SHOWN:
-            print(f"... and {len(out_of_scope) - OUT_OF_SCOPE_SHOWN} more")
-        groups = group_by_top_dir(out_of_scope)
-        for d, fs in groups.items():
-            if len(fs) > HINT_DIR_FILES:
-                print(f"hint: {len(fs)} blocked files under {d}/; likely a dependency or build folder; add it to .gitignore")
-        log_incidents(a.log, tid, [incident_row(d, fs) for d, fs in groups.items()])  # one row per top-level directory
-        return 1, None
+    for i in a.include if tid == a.task[0] else []:
+        if not any(cs.include_match([i])(f) for f in mine):
+            print(f"warning: --include {i}: no change to save", file=sys.stderr)
+    if out_of_scope:  # never refuses: warn, log a noted incident per top-level directory, save the task's own files
+        cs.warn_out_of_scope(tid, out_of_scope, a.log)
     if not mine:
         print(f"nothing to checkpoint for {tid}", file=sys.stderr)
         return 1, None
@@ -452,7 +424,9 @@ def checkpoint_one(a, tid, info, own_files):  # O(m*o + py size) + git spawns (s
     py = [f for f in present if f.endswith(".py")]
     problems = syntax_errors(py)
     if not problems:
-        problems = import_errors([f for f in py if is_module(f)])
+        problems, missing = ci.check([f for f in py if is_module(f)], state.DIR_NAME)
+        for f, line, msg in missing:
+            print(f"warning: import {f}:{line} {msg}", file=sys.stderr)
     if problems:
         for f, line, msg in problems:
             print(f"{'syntax' if msg.startswith('SyntaxError') else 'import'} "
@@ -462,6 +436,8 @@ def checkpoint_one(a, tid, info, own_files):  # O(m*o + py size) + git spawns (s
         return 1, None
     sha = save_checkpoint(tid, task["title"], mine, a.plan)  # hidden ref: HEAD, branch, index and tree untouched
     append_ledger(a.ledger, f"- checkpoint {tid} {sha[:10]} {task['title']}")
+    if out_of_scope or a.include:
+        print(f"checkpoint {tid} {sha[:10]} saved: {len(mine)} files, {len(out_of_scope)} out-of-scope left out", file=sys.stderr)
     spawn_learn(a.plan)
     launch_probes(sha, a.plan)
     launch_seam_checks(a.plan, tid, a.ledger, a.log)
@@ -498,7 +474,9 @@ def write_blocked(plan, task, tier):
 def main(argv=None):  # O(L + t*(m*o)) + git spawns per task; one process for all tasks
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("task", nargs="*", help="one or more task ids, checkpointed in order")
-    ap.add_argument("--plan", default=nt.DEFAULT_PLAN)
+    ap.add_argument("--plan", help="the run's plan (default: the one the run recorded, see checkpoint_scope.resolve_plan)")
+    ap.add_argument("--include", action="append", default=[], metavar="PATH",
+                    help="also save this changed file or folder outside Owns with the first task (repeatable)")
     ap.add_argument("--ledger", default=DEFAULT_LEDGER)
     ap.add_argument("--log", default=DEFAULT_LOG)
     ap.add_argument("--dispatch", action="store_true",
@@ -513,6 +491,11 @@ def main(argv=None):  # O(L + t*(m*o)) + git spawns per task; one process for al
     ap.add_argument("--tier", help="required fixer tier for --blocked (haiku|sonnet|opus)")
     ap.add_argument("--agent", default="", help="implementer id for --question")
     a = ap.parse_args(argv)
+    a.include = [cs.norm_path(i) for i in a.include]
+    a.plan, source = cs.resolve_plan(a.plan, a.task or [t for t in (a.question, a.answered, a.blocked) if t], a.pool)
+    if source:
+        print(f"plan: {a.plan} (from {source})", file=sys.stderr)
+    found, a.plan = bool(a.plan), a.plan or nt.DEFAULT_PLAN  # --question/--answered/--blocked only need its folder
     if a.question:
         write_questions(a.plan, a.question, a.agent)
         print(f"question {a.question}")
@@ -532,6 +515,8 @@ def main(argv=None):  # O(L + t*(m*o)) + git spawns per task; one process for al
             return 0
     if not a.task:
         nt.die("checkpoint needs a task id (or --question/--answered/--blocked)")
+    if not found:
+        nt.die("no plan found for this run (no checkpoints.json or pool plan, no single docs/plans match): pass --plan <plan.md>")
 
     info = nt.parse_plan(a.plan)
     if "T0" not in info:  # a Wave 0 task synthesized by `wave0`
