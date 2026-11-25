@@ -398,6 +398,11 @@ def _frozen_line(t: str, plan: Plan, old: dict, sent: set, run_dir: Path, interf
     return f"FROZEN: {t} interface changed after dispatch: {_iface_str(old_if[t])} -> {_iface_str(new_i)}; add a follow-up fix task"
 
 
+def _rel_plan(plan, run_dir) -> str:  # O(path); the linted plan, project-relative when inside (checkpoint reads it)
+    p, root = Path(plan).resolve(), Path(run_dir).resolve().parent
+    return p.relative_to(root).as_posix() if p.is_relative_to(root) else p.as_posix()
+
+
 def _forget(old: dict, sent: set, ids: set) -> tuple[dict, set]:
     """The saved lint state and the dispatched set without `ids`: their record is treated as stale (guard light)."""
     def drop(v):
@@ -541,7 +546,7 @@ def cmd_lint_stable(args) -> int:  # O(lint + n*k*s)
     accepted = [w[len("NOTE: "):] for w in warnings if w.startswith("NOTE: accepted Ruling: sequential")]  # for finish
     base.write_json(run_dir / "chain-rulings.json", accepted)
     base.write_json(out, {"stable": stable, "fix": fix, "plan_issues": plan_issues, "interfaces": interfaces,
-                          "blocks": blocks, "tiers": tiers, "critical_path": cp_ids})
+                          "blocks": blocks, "tiers": tiers, "critical_path": cp_ids, "plan": _rel_plan(args.plan, run_dir)})
     entry = {"time": datetime.now().isoformat(timespec="seconds"), "stable": len(stable), "fix": len(fix),
              "stable_ids": stable, "newly_stable": [t for t in stable if t not in set(old.get("stable") or [])],
              "dispatched": sorted(sent & set(stable), key=nkey), "pending": pending, "frozen": len(frozen)}

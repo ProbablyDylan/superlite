@@ -245,6 +245,19 @@ def test_a_recorded_plan_without_the_task_is_skipped(tmp_path):
     assert tree(repo, r.stdout.strip()) == ["src/g.py"]
 
 
+def test_the_plan_lint_last_froze_wins_over_an_earlier_run_reusing_its_ids(tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, "src/a.py")
+    assert cp(repo, "T1", "--plan", "plan.md").returncode == 0  # an earlier run recorded plan.md, which has a T1
+    nxt = "docs/plans/2026-11-25-next.md"
+    write(repo, nxt, "# Next\n\n## 9. Implementation plan\n\n" + NEW_PLAN.replace("T7", "T1"))
+    write(repo, ".superlite/stable.json", json.dumps({"stable": ["T1"], "plan": nxt}))  # lint --stable of the new plan
+    write(repo, "src/g.py")
+    r = cp(repo, "T1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"plan: {nxt}" in r.stderr and tree(repo, r.stdout.strip()) == ["src/g.py"]
+
+
 def test_no_plan_with_the_task_asks_for_plan(tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "src/a.py")

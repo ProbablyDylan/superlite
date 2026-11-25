@@ -106,6 +106,7 @@ def test_stable_unstable_root_reached_only_through_consumes(tmp_path):
     assert data["interfaces"]["T2"] == {"consumes": [PROD], "produces": []}
     assert "T1" not in data["interfaces"]
     assert "STABLE: T2 T3 T4" in cp.out
+    assert not data["plan"].startswith("/") and (tmp_path / data["plan"]).is_file()  # for checkpoint: this run's plan
 
 
 def test_stable_real_edge_to_unstable_task_blocks_dependents(tmp_path):

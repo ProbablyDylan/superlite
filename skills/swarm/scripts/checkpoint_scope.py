@@ -51,7 +51,9 @@ def resolve_plan(given, tids, pool):  # O(P*L)
     sl = Path(state.DIR_NAME)
     review = _recorded(sl / "orchestrator.json", "review_path")
     agent_plan = COMPANION.sub(".md", review) if review and COMPANION.search(review) else None
-    for src, p in (("checkpoints.json", _recorded(sl / "checkpoints.json", "plan")), ("pool", _recorded(pool, "plan")),
+    # The plan lint --stable last froze is this run's: first, so an earlier run's plan that reuses T1..Tn loses.
+    for src, p in (("stable.json", _recorded(sl / "stable.json", "plan")),
+                   ("checkpoints.json", _recorded(sl / "checkpoints.json", "plan")), ("pool", _recorded(pool, "plan")),
                    ("review plan", agent_plan), ("default", nt.DEFAULT_PLAN)):
         if not (p and Path(p).is_file()):
             continue
