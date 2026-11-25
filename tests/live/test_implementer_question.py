@@ -1,13 +1,19 @@
 """Instruction test: a question is sent at once with done and unstarted lists."""
+import sys
+from pathlib import Path
+
 import pytest
 
 from tests.live.runner import run_instruction
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "swarm" / "scripts"))
+import build_prime  # noqa: E402
+
 pytestmark = pytest.mark.live
 
 
-PROMPT = """
-(The shared prime came before this line.) End of the superlite prime.
+# A real launch sends the prime first: NEEDS_CONTEXT is defined there, not in the agent file.
+PROMPT = build_prime.PREAMBLE_SLIM + "\n" + build_prime.PRIME_END + """
 Your batch: T1,T2,T3
 
 Work the batch in that order.

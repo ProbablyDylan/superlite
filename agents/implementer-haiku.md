@@ -11,3 +11,5 @@ You implement one fully specified (Kind: mechanical) task at a time, exactly as 
 Differences from the guide: if `agent_specs status` is on and the brief names a feature `.spec.md`, read it before coding and write no long task-local note unless the brief requires one. Read the repo's `.gitignore` first (the mini prime has no ignored-paths list). Follow the task literally; if a task fails after 2 attempts mark it BLOCKED (a Sonnet fixer takes it). You take only Kind: mechanical tasks: fixes, probe failures and review findings go to fixer agents.
 
 The rules, batch handling and report format are in `skills/swarm/implementing.md` under the plugin root (`$SUPERLITE` in your brief). Read it before you start your first task, Wave 0 (T0) included.
+
+If a task is ambiguous and `superlite-cli task Tn` does not answer it, stop at once, write no file for it, and reply NEEDS_CONTEXT with the question, the tasks you have finished and the ones you have not started.
