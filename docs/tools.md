@@ -29,7 +29,7 @@ A checkpoint is a hidden save of one task under `refs/superlite/*`. superlite ne
 | `learn` | `sync [--plan P] [--final] [--status finished]` learns from the run's signals (advisory); `note --task Tn --tag T --text X` records a `Learned:` line. Anonymised rows go to an outbox under the superlite home |
 | `review_findings` | `record [--file F]` (stdin otherwise) stores the final reviewer's `file:line - problem - fix - tier N` lines in the run folder |
 | `incident` | Records and queries the shared incident log (file, line, context) |
-| `budget` | One line of elapsed time and cost against the plan's target and cap |
+| `budget` | One line of elapsed time and cost against the plan's target and cap. Elapsed is this run's working time: agent spans since the last finish or idle close, a pause counted up to 5 minutes, a pause over 6 hours starting the count again; cost counts this run's agents and coordinator turns |
 | `metrics` | Per-task time, tokens and cost from `.superlite/metrics.jsonl` and agent transcripts |
 | `history` | Run history: `write` rows to `history.jsonl` in the superlite home (`$SUPERLITE_HOME`, else `$XDG_DATA_HOME/superlite`), `read`, `derive` stats, `import` bench scores |
 | `graphify_gate` | Gates Graphify for search in non-trivial codebases |

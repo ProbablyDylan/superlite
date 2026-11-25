@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_idle  # noqa: E402
 import session_hud  # noqa: E402
 import state  # noqa: E402
 
@@ -71,7 +72,8 @@ def project_state(root=".") -> str:  # O(n)
     if row is not None:
         if session_hud.run_of(row) == "open" and (r / state.DIR_NAME / "orchestrator.json").is_file():
             return RUNNING
-    elif (r / state.DIR_NAME / "orchestrator.json").is_file() and (r / "docs" / "plans").is_dir():
+    elif (r / state.DIR_NAME / "orchestrator.json").is_file() and (r / "docs" / "plans").is_dir() \
+            and not run_idle.closed(r / state.DIR_NAME):
         return RUNNING
     try:
         has_entries = any(True for _ in r.iterdir())  # stops at the first entry

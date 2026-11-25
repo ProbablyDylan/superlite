@@ -265,8 +265,9 @@ def report_of(stop_event, limit=400) -> str:  # O(transcript)
 
 def session_transcript(sl_dir: Path) -> str | None:  # O(M)
     """The coordinator's (main session) transcript: a `session_transcript`/`transcript_path` key on any metrics line, else
-    derived from an agent transcript path `<dir>/<session>/subagents/agent-X.jsonl` -> `<dir>/<session>.jsonl`."""
-    lines = read_jsonl(sl_dir / "metrics.jsonl")
+    derived from an agent transcript path `<dir>/<session>/subagents/agent-X.jsonl` -> `<dir>/<session>.jsonl`. The
+    newest line wins: a run nobody finished shares metrics.jsonl with earlier sessions."""
+    lines = read_jsonl(sl_dir / "metrics.jsonl")[::-1]
     for e in lines:
         for k in ("session_transcript", "transcript_path"):
             if e.get(k) and Path(e[k]).is_file():
@@ -280,9 +281,10 @@ def session_transcript(sl_dir: Path) -> str | None:  # O(M)
     return None
 
 
-def coordinator_record(sl_dir, prices=None) -> dict | None:  # O(bytes of the main transcript)
+def coordinator_record(sl_dir, prices=None, since: float = 0.0) -> dict | None:  # O(bytes of the main transcript)
     """The coordinator as one line: usage per assistant message (deduplicated by message id), turns, context peak and
-    median (input + cache read + cache write per message), cost by model, and its first-to-last message time."""
+    median (input + cache read + cache write per message), cost by model, and its first-to-last message time. With
+    `since` (epoch s), only messages at or after it."""
     sl_dir = Path(sl_dir)
     path = session_transcript(sl_dir)
     if not path:
@@ -296,6 +298,8 @@ def coordinator_record(sl_dir, prices=None) -> dict | None:  # O(bytes of the ma
         msg = e.get("message") or {}
         u = msg.get("usage") or {}
         t = _ts(e)
+        if since and (t is None or t < since):
+            continue
         if t is not None:
             first = t if first is None else first
             last = t
@@ -333,11 +337,13 @@ def coordinator_record(sl_dir, prices=None) -> dict | None:  # O(bytes of the ma
             "duration_s": round(last - first, 1) if first is not None and last is not None else None, "transcript": path}
 
 
-def agents_cost(sl_dir, prices=None) -> float:  # O(M + B)
-    """Cost of every agent segment in metrics.jsonl, including ones not mapped to a plan task."""
+def agents_cost(sl_dir, prices=None, since: float = 0.0) -> float:  # O(M + B)
+    """Cost of every agent segment in metrics.jsonl, including ones not mapped to a plan task; with `since` (epoch s),
+    only agents launched at or after it."""
     prices = prices or load_prices()
     return sum(cost_of(s["tok"], prices.get(family(s["model"]) or family(a["type"]) or "sonnet") or prices["sonnet"])
-               for a in agent_records(Path(sl_dir)) for s in a["segments"])
+               for a in agent_records(Path(sl_dir)) for s in a["segments"]
+               if not since or (a.get("first_abs") or (a.get("start_ms") or 0) / 1000.0) >= since)
 
 
 def reconcile(sl_dir, stream_log, prices=None) -> dict:  # O(M + B + log)

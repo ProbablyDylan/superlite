@@ -73,6 +73,20 @@ if [ -d .superlite ] || [ -f .git ]; then
   hud_line="$(SUPERLITE_NO_SESSION_HUD=0 "$py" "${PLUGIN_ROOT}/skills/swarm/scripts/session_hud.py" . 2>/dev/null || true)"
 fi
 
+# A run nobody finished: once it sat idle for hours, run_idle.py writes .superlite/run.idle so the hooks stop treating
+# it as live (one spawn, only while a run marker is newer than run.finished and run.idle).
+idle_line=""; run_on=0
+for mk in .superlite/stable.json .superlite/prime.md .superlite/pool.json; do
+  if [ -f "$mk" ] && [ "$mk" -nt .superlite/run.finished ] && [ "$mk" -nt .superlite/run.idle ]; then
+    idle_line="$("$py" "${PLUGIN_ROOT}/skills/swarm/scripts/run_idle.py" . 2>/dev/null || true)"
+    [ -z "$idle_line" ] && run_on=1
+    break
+  fi
+done
+# Closed: finished or idle-closed, and no marker newer (the fallback below then says existing code).
+run_closed=0
+if [ "$run_on" = 0 ] && { [ -f .superlite/run.finished ] || [ -f .superlite/run.idle ]; }; then run_closed=1; fi
+
 # Project state hint for the start menu: bash builtins only (no spawned process).
 state="empty folder"
 shopt -s nullglob dotglob
@@ -82,7 +96,7 @@ if [[ $hud_first == *' | run:open'* ]] && [ -f .superlite/orchestrator.json ]; t
   state="run in progress"
 elif [[ $hud_first == *' | run:'* ]]; then
   state="existing code"
-elif [ -f .superlite/orchestrator.json ] && [ -d docs/plans ]; then
+elif [ "$run_closed" = 0 ] && [ -f .superlite/orchestrator.json ] && [ -d docs/plans ]; then
   state="run in progress"
 elif [ -d .git ] || [ "${#entries[@]}" -gt 0 ]; then
   state="existing code"
@@ -91,6 +105,7 @@ shopt -u nullglob dotglob
 content="${content}"$'
 
 '"Project state: ${state}."
+[ -n "$idle_line" ] && content="${content}"$'\n'"${idle_line}"
 
 # First session after this version is installed: show the intro screen once. The marker lives in
 # $SUPERLITE_HOME (default $XDG_DATA_HOME/superlite, else ~/.local/share/superlite), one file per version, so an upgrade shows it again.

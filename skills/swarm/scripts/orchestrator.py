@@ -197,7 +197,8 @@ def main(argv=None):
     a = ap.parse_args(argv or ["status"])  # bare: status, not a usage error
     if a.cmd == "set":
         write_state(a.plan, {"mode": a.mode, "approved": a.mode == "ai", "by": a.by, "time": now()})
-        (sl_dir(a.plan) / "run.finished").unlink(missing_ok=True)  # a new run: its markers count as active again
+        for done in ("run.finished", "run.idle"):  # a new run: its markers count as active again
+            (sl_dir(a.plan) / done).unlink(missing_ok=True)
         if a.mode == "ai" and a.ruling:
             f = sl_dir(a.plan) / "progress.md"
             with f.open("a", encoding="utf-8") as fh:
